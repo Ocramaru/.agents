@@ -1,0 +1,27 @@
+[project]
+name = "agentkit"
+version = "0.1.0"
+description = "Standards, notes and subagent reviews, shared across machines and agents"
+requires-python = ">=3.12"
+dependencies = ["duckdb>=1.0", "rich>=13"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false          # there is no build step; bin/agent puts the repo on the path
+
+[tool.ruff]
+indent-width = 2
+line-length = 120        # a ceiling for the linter, not a target; long where long reads better
+
+[tool.ruff.lint]
+# E501 stays unselected so length is never enforced, and E701 is ignored because the one-line
+# `if`s in agentkit are deliberate. See standards/python.md, which this file encodes.
+#
+# RUF022 sorts __all__ one name per line, which threw away the grouping by source module that
+# was the point of the layout -- a formatter's job done by a lint rule, so `--fix` would do it.
+#
+# I001 is the same: it re-explodes a parenthesized import to one module per line, which is 17 lines
+# for cli.py's 15 imports. Sorting is worth keeping by hand; the wrapping is not the linter's call.
+ignore = ["E701", "E702", "E741", "RUF022", "I001"]

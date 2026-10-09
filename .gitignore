@@ -1,0 +1,14 @@
+# Plugin-installed AWS skills that were already here. Not mine.
+skills/
+
+# Your profile is its own private repo, cloned inside this one; where it lives is this machine's.
+/profile/
+local.toml
+
+__pycache__/
+sessions/
+*.bak
+reviews.json
+.venv/
+.hooks.log
+.claude/worktrees/

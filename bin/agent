@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Entry point.
+#
+# Through `uv run`, so the hub's own venv is what agentkit imports and a fresh clone provisions
+# itself on first use -- duckdb included. uv costs about 30ms, which the inject hook can afford.
+#
+# Without uv, plain python3 still runs everything the hooks need. Only `agent sub review` wants a
+# dependency, and it says so rather than failing obscurely.
+set -euo pipefail
+
+# Follow the symlink ~/.local/bin/agent -> the repo by hand: `readlink -f` is GNU, and a Mac
+# before 12.3 does not have it. Without this, agent could not find its own repo.
+src=${BASH_SOURCE[0]}
+while [ -L "$src" ]; do
+  dir=$(cd -P -- "$(dirname -- "$src")" && pwd)
+  src=$(readlink -- "$src")
+  case $src in /*) ;; *) src="$dir/$src" ;; esac
+done
+HUB=$(cd -P -- "$(dirname -- "$src")/.." && pwd)
+
+# -P: `-m` otherwise puts the current directory first on sys.path, so running `agent` from inside
+# any checkout holding an `agentkit/` -- another clone of .agents -- ran that one instead.
+if command -v uv >/dev/null 2>&1; then
+  exec env PYTHONPATH="$HUB" uv run --project "$HUB" --quiet python -P -m agentkit "$@"
+fi
+exec env PYTHONPATH="$HUB" python3 -P -m agentkit "$@"

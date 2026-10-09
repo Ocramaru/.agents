@@ -1,0 +1,88 @@
+# Machine-wide settings: review, injection, the formatter guard and the backends reviews run on. A profile's config.toml and this
+# machine's local.toml layer over it, and a repo sets its own [review], [guard] and `inject` in its .agents/agents.toml.
+
+[review]
+exclude = [
+  "**/vendor/**",
+  "**/*.min.js",
+  "**/*.min.css",
+  "**/package-lock.json",
+  "**/uv.lock",
+]
+# Which agents a routed review (`agent sub review auto`) considers. Each one is offered only the
+# files its own standards govern, so a commit touching a notebook and a blog post is two reviews by
+# two agents and not one agent guessing.
+agents = ["file-review", "doc-check"]
+# The model role a reviewer gets when its definition names none. [backends] below maps each role to
+# a model per backend, so this has to be a role every backend you use declares.
+model = "text"
+jobs = 4
+limit = 0
+max_bytes = 200_000
+
+[inject]
+budget = 24000     # guard only; context-only chains come in far under this
+map_over = 6144    # a note larger than this is sent as its section map, to be read by section.
+                   # 2048 was too tight: a 2 KB context.md tipped past it and a session got a
+                   # 375-byte table instead of a note it could simply have read.
+nearest = "context"     # only context.md loads automatically; it says how to operate here
+ancestors = "context"   # same for ancestors: assumptions bind, findings do not
+
+# Commands the no-reformat hook refuses, once `enabled`. An entry's words lead the command, as globs, and
+# its flags appear anywhere in it: `ruff check --unsafe-fixes`. A profile or local.toml turns it on or
+# replaces a list; a repo's .agents/agents.toml can set `enabled = false` for itself.
+[guard]
+enabled = false
+formatters = ["black", "blacken-docs", "autopep8", "yapf", "blue", "isort", "prettier", "gofmt", "rustfmt", "clang-format", "swiftformat", "shfmt", "buildifier", "ruff format", "ruff check --unsafe-fixes", "cargo fmt", "go fmt", "mix format", "dprint fmt", "taplo fmt", "terraform fmt"]
+targets = ["fmt", "format", "reformat"]   # names a script runner below runs, so `make fmt` is a formatter
+advice = "this layout is hand-maintained and a formatter undoes it. Lint with 'ruff check --fix' instead, and fix layout by hand in the surrounding file's idiom."
+# How a command runs without being named first: a runner stands in front of one, with any flags after it;
+# a script runner runs a target by name; an inspect flag makes a formatter write nothing.
+runners = ["sudo", "env", "time", "nice", "nohup", "xargs", "command", "exec", "!", "{", "if", "then", "else", "elif", "do", "while", "until", "uv run", "uv tool run", "uvx", "pipx run", "poetry run", "pdm run", "hatch run", "pipenv run", "rye run", "mise exec", "mise x", "nox", "tox", "npx", "pnpm exec", "pnpm dlx", "yarn", "yarn dlx", "yarn exec", "bunx", "bun x", "deno run", "python* -m"]
+scripts = ["make", "just", "npm run", "pnpm run", "yarn run", "yarn", "bun run"]
+inspect = ["--check", "--diff", "--list-different", "--dry-run"]
+
+# Where agents run, by name. `resume_argv` means the backend keeps its own context; without it, replay.
+[backends]
+default = "claude"
+
+[backends.claude]
+kind = "cli"
+format = "json"
+# A reviewer reads what it is handed and answers. `--tools ""` is what `tools: none` in an agent
+# definition means -- without it one opened files and started the codex MCP server mid-review.
+# `--strict-mcp-config` skips every MCP server; `--bare` would skip more, but it refuses a
+# subscription login and only takes an API key.
+argv = ["claude", "-p", "{prompt}", "--model", "{model}", "--output-format", "json",
+        "--tools", "", "--strict-mcp-config"]
+resume_argv = ["claude", "-p", "{prompt}", "--resume", "{session}", "--output-format", "json",
+               "--tools", "", "--strict-mcp-config"]
+effort_argv = ["--effort", "{effort}"]   # added when a reviewer or `--effort` asks for one
+session_key = "session_id"
+reply_key = "result"
+# Sonnet for every role by default. Opus on a 400-line training script ran past five minutes and
+# timed out with nothing to show; `--tier large` still reaches it, `--tier small` reaches Haiku.
+models = { text = "claude-sonnet-5", code = "claude-sonnet-5", code-large = "claude-sonnet-5", small = "claude-haiku-4-5-20251001", large = "claude-opus-5" }
+timeout = 600   # seconds per call; a review that needs longer should say so rather than vanish
+
+# --json emits an event stream: thread.started carries the handle, item.completed the message.
+[backends.codex]
+kind = "cli"
+format = "jsonl"
+argv = ["codex", "exec", "--json", "--skip-git-repo-check", "--model", "{model}", "{prompt}"]
+resume_argv = ["codex", "exec", "resume", "{session}", "--json", "{prompt}"]
+session_key = "thread_id"
+reply_key = "item.text"
+models = { text = "gpt-5-mini", code = "gpt-5", code-large = "gpt-5", small = "gpt-5-mini", large = "gpt-5" }
+
+# Local, free, and the only backend that keeps a review off the network. Roles rather than
+# sizes: prose judged by a coder model reads like a linter, and code judged by a general
+# small one crashes ollama swapping weights.
+[backends.ollama]
+kind = "http"
+url = "http://localhost:11434/v1/chat/completions"
+models = { text = "qwen3:8b", text-large = "qwen2.5:14b", code-large = "qwen3-coder:30b" }
+parallel = 1   # one server, one model resident; concurrent calls during a swap take it down
+# Where to hand the memory back. A finished review says so rather than leaving 17.5 GB of weights
+# and KV cache sitting on a shared pool until the keep-alive expires.
+release_url = "http://localhost:11434/api/generate"

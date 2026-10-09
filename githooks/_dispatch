@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Every repo's git hooks, through core.hooksPath (set by `agent hook install --global`).
+#
+# core.hooksPath replaces each repo's .git/hooks outright, so this runs the repo's own hook first:
+# without that, turning this on would silently switch off every hook a repo already had. A repo
+# hook that fails still fails the operation, exactly as it would have alone.
+#
+# Then, on post-commit only, it reviews -- and only in a repo that has opted in by having a
+# .agents/. Third-party repos with no .agents are never touched.
+name=$(basename "$0")
+own="$(git rev-parse --git-common-dir 2>/dev/null)/hooks/$name"
+
+# our own per-repo shim would review a second time, so it is the one hook not chained to
+if [ -x "$own" ] && ! grep -q 'installed by `agent hook install`' "$own" 2>/dev/null; then
+  "$own" "$@" || exit $?
+fi
+
+[ "$name" = post-commit ] || exit 0
+root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+. "$HOME/.agents/hooks/log.sh" 2>/dev/null || hook_log() { :; }
+repo=$(basename "$root") sha=$(git rev-parse --short HEAD 2>/dev/null)
+# A note, not just the directory: `agent sub review` creates `.agents/.reviews/` wherever it runs,
+# so the bare directory is a side effect of having been reviewed once, not a decision to opt in.
+# The four names are `notes.NOTES`, mirrored rather than asked for, because shelling to python here
+# would charge every commit in every repo for a question that is usually answered "no".
+opted_in=
+for note in context learned todo todo.archive; do
+  [ -f "$root/.agents/$note.md" ] && opted_in=1 && break
+done
+if [ -z "$opted_in" ]; then
+  hook_log post-commit git "skip   $repo $sha: no notes in .agents/, so not opted in"
+  exit 0
+fi
+hook_log post-commit git "review $repo $sha: started in the background"
+exec "$HOME/.agents/hooks/post-commit.sh" auto
