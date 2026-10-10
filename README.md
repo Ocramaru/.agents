@@ -97,11 +97,12 @@ agent sub reviews --failed --agent logic
 | [`commands/`](commands) | `/agents` and `/standards`, for loading on demand |
 | `settings.hooks.json` | the hooks block `agent install` writes into Claude Code's settings |
 | [`githooks/`](githooks) | one dispatcher under every git hook name, for `agent hook install --global` |
+| [`templates/`](templates) | what `agent init` writes into a new `.agents/`, and `agent profile init` into a new profile |
 | [`INTEGRATION.md`](INTEGRATION.md) | the stable surface for indexers: what to read, and what not to parse |
 
 ## What each agent gets
 
-Claude Code is the only one with a hook system, so it gets the full thing: standards inject themselves when you edit a file they govern, `.agents/` notes inject themselves when you edit a file near them, and a `PreToolUse` guard refuses to run a whole-file formatter.
+Claude Code is the only one with a hook system, so it gets the full thing: standards inject themselves when you edit a file they govern, `.agents/` notes inject themselves when you edit a file near them, and a `PreToolUse` guard, once `[guard]` turns it on, refuses to run a whole-file formatter.
 
 Codex and Gemini have a global instructions file and no hooks. They get the pointer to `AGENTS.md` and nothing auto-injects, which is why `AGENTS.md` carries a one-line summary of each standard rather than only links.
 

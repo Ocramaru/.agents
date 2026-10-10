@@ -251,7 +251,7 @@ def test_init_writes_a_context_and_a_readme_and_never_overwrites_one(tmp_path):
   assert (root / ".agents" / "README.md").read_text() == "mine\n"
   pkg = root / "pkg"
   tree.init(pkg)
-  assert "created by Marco Cassar" in (pkg / ".agents" / "README.md").read_text()
+  assert (pkg / ".agents" / "README.md").read_text() == (profile.TEMPLATES / "agents" / "README.md").read_text()   # the template, as it ships
   assert [p.name for p in notes.note_files(pkg / ".agents")] == ["context.md"]
   assert not (pkg / ".agents" / "agents.toml").exists()   # a written path would not survive a clone
 
