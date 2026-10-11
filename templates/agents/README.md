@@ -12,6 +12,7 @@ Any directory can hold an `.agents/` folder. The notes travel with the code thro
 | `todo.archive.md` | finished work, kept as the record of why the code looks the way it does |
 | `standards/` | this repo's additions to the shared style rules, such as how Python or commits are written here |
 | `agents.toml` | settings for the tooling in this directory |
+| `.local/` | notes for this machine only, laid out like this folder and never committed |
 
 A note that gets long can be split into a folder of the same name, one file per section, with the original kept as a short index of the parts:
 

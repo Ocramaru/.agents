@@ -39,10 +39,10 @@ def file(name: str) -> Path | None:
 
 
 def section(name: str, repo: Path | None = None, add: tuple[str, ...] = ()) -> dict:
-  """One config section: the hub's config.toml, the profile's, this machine's local.toml, then `repo`'s .agents/agents.toml, each key replacing the last except those in `add`, which accumulate.
+  """One config section: the hub's config.toml, the profile's, this machine's local.toml, then `repo`'s .agents/agents.toml and its .local/agents.toml, each key replacing the last except those in `add`, which accumulate.
   `AGENTS_PROFILE=""` leaves out the profile and local.toml, so a test reads only the config it is given."""
   settings: dict = {}
-  for layer in (CONFIG, file("config.toml"), None if os.environ.get("AGENTS_PROFILE") == "" else LOCAL, Path(repo) / ".agents" / "agents.toml" if repo else None):
+  for layer in (CONFIG, file("config.toml"), None if os.environ.get("AGENTS_PROFILE") == "" else LOCAL, *((Path(repo) / ".agents" / "agents.toml", Path(repo) / ".agents" / ".local" / "agents.toml") if repo else ())):
     if not layer or not layer.is_file(): continue
     for key, value in tomllib.loads(layer.read_text(encoding="utf-8")).get(name, {}).items(): settings[key] = settings.get(key, []) + value if key in add else value
   return settings

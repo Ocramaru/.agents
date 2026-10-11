@@ -12,7 +12,7 @@ Any directory may hold an `.agents/` directory. It holds up to three files, and 
 | `learned.md` | what we have learned: what experiments showed, and the traps that already cost a run |
 | `todo.md` | open work, scoped to this directory |
 
-Notes are scoped to where they sit. A repo-root `.agents/` is repo-wide; a package's `.agents/` is about that package. They compose: outermost first, most specific last, so a package can narrow or override what the root says.
+Notes are scoped to where they sit. A repo-root `.agents/` is repo-wide; a package's `.agents/` is about that package. They compose: outermost first, most specific last, so a package can narrow or override what the root says. `.agents/.local/` holds notes for this machine only, laid out like the `.agents/` it sits in and never committed; it is read right after that `.agents/` and overrides it.
 
 `todo.archive.md` is optional and holds finished tasks. Move things there rather than deleting them; a closed task explains why the code looks the way it does.
 

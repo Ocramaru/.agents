@@ -256,7 +256,6 @@ def test_init_writes_a_context_and_a_readme_and_never_overwrites_one(tmp_path):
   assert not (pkg / ".agents" / "agents.toml").exists()   # a written path would not survive a clone
 
 
-# -- the section map, and splitting a note ---------------------------------------------------------
 def learned(d: Path, body: str = "## Settled\n\na\n\n## Traps\n\nb\n") -> Path:
   d.mkdir(parents=True, exist_ok=True)
   f = d / "learned.md"
@@ -516,7 +515,7 @@ def test_the_write_queue_keeps_every_record_or_raises(ledger, monkeypatch):
       put_row(record(ledger, f"t{i}", f"f{i}.py", [{"line": i, "issue": f"bad {i}"}]))
   rows = reviews.conversations(ledger)
   assert len(rows) == 6 and [r["id"] for r in rows] == sorted(r["id"] for r in rows)   # uuid7 orders itself
-  assert (ledger / ".agents" / ".gitignore").read_text().strip() == ".reviews/"
+  assert (ledger / ".agents" / ".gitignore").read_text().splitlines() == [".reviews/", ".local/"]
   monkeypatch.setattr(reviews, "connect", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no duckdb")))
   with pytest.raises(RuntimeError, match="no duckdb"), reviews.writer(ledger) as put_row:
     put_row({"id": "x"})

@@ -18,12 +18,11 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from agentkit import agents, tree
+from agentkit import agents, profile, tree
 from agentkit.session import Message, Session
 
 DIR = ".reviews"
 DB = "reviews.duckdb"
-IGNORE = ".reviews/\n"
 
 SCHEMA = """
 create table if not exists reviews (
@@ -75,7 +74,7 @@ def path(root: Path, create: bool = True) -> Path:
   if create:
     directory.mkdir(parents=True, exist_ok=True)
     ignore = directory.parent / ".gitignore"
-    if not ignore.is_file(): ignore.write_text(IGNORE, encoding="utf-8")
+    if not ignore.is_file(): ignore.write_text((profile.TEMPLATES / "agents" / ".gitignore").read_text(encoding="utf-8"), encoding="utf-8")
   return directory / DB
 
 

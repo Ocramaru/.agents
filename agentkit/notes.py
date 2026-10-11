@@ -25,12 +25,17 @@ def note_files(agents_dir: Path) -> list[Path]:
                 + [part for part in directory.glob("*/*.md") if part.parent.name in NOTES])
 
 
+def holds(directory: Path) -> bool:
+  """Whether `directory` is a note directory: a `.agents`, or the `.local` directly inside one."""
+  return directory.name == ".agents" or (directory.name == ".local" and directory.parent.name == ".agents")
+
+
 def is_note(path: Path) -> bool:
-  """Whether `path` is a note directly in a `.agents` or a part one level down, the two levels `note_files` walks."""
+  """Whether `path` is a note directly in a note directory or a part one level down, the two levels `note_files` walks."""
   candidate = Path(path)
   if candidate.suffix != ".md": return False
-  if candidate.parent.name == ".agents": return candidate.stem in NOTES
-  return candidate.parent.name in NOTES and candidate.parent.parent.name == ".agents"
+  if holds(candidate.parent): return candidate.stem in NOTES
+  return candidate.parent.name in NOTES and holds(candidate.parent.parent)
 
 
 TASK = re.compile(r"^\s*-\s*\[[ xX]\]\s*(.+?)\s*$")
@@ -50,7 +55,7 @@ def abandoned(path: Path, old: str, new: str) -> str:
   gone = [task for task in tasks(old) if not _listed(task, kept)]   # annotated in place is still kept
   if not gone: return ""
 
-  done = [archived for archive in note_files(note.parent if note.parent.name == ".agents" else note.parent.parent) if match_name(archive) == "todo.archive.md" for archived in tasks(archive.read_text(encoding="utf-8"))]   # or its parts
+  done = [archived for archive in note_files(note.parent if holds(note.parent) else note.parent.parent) if match_name(archive) == "todo.archive.md" for archived in tasks(archive.read_text(encoding="utf-8"))]   # or its parts
   # task against task, never the archive as text, where any line mentioning a task counts as filing it
   if not (gone := [task for task in gone if not _listed(task, done)]): return ""
   return (f"This edit removes {len(gone)} task{'' if len(gone) == 1 else 's'} from {note.name}, {'which is' if len(gone) == 1 else 'which are'} not in todo.archive.md. A finished task is moved "

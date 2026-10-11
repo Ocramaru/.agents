@@ -57,20 +57,19 @@ def git_root(directory: Path) -> Path | None:
 
 
 def find_note_dirs(root: Path) -> list[Path]:
-  """Every `.agents` directory under a tree that holds notes.
+  """Every `.agents` directory under a tree that holds notes, and each `.local` inside one that does.
 
   It walks rather than globs, so a SKIP directory is pruned before it is entered and no symlink is followed.
   """
   found = []
   for here, directories, _ in os.walk(Path(root).resolve()):
     directories[:] = [name for name in directories if not ignored(name)]
-    agents_dir = Path(here) / ".agents"
-    if ".agents" in directories and notes.note_files(agents_dir): found.append(agents_dir)
+    if ".agents" in directories: found += [directory for directory in (Path(here) / ".agents", Path(here) / ".agents" / ".local") if notes.note_files(directory)]
   return sorted(found)
 
 
 def chain(path: Path) -> list[Path]:
-  """`.agents` directories governing a file, outermost first, nearest last.
+  """`.agents` directories governing a file, outermost first, nearest last, each `.local` right after its own `.agents`.
 
   It walks up to the repo root, so a chain never leaves its repo.
   """
@@ -80,8 +79,7 @@ def chain(path: Path) -> list[Path]:
 
   found, current = [], start
   while True:
-    agents_dir = current / ".agents"
-    if notes.note_files(agents_dir) or (agents_dir / LINKS).is_file(): found.append(agents_dir)   # config alone counts: [applies] with no notes
+    if (current / ".agents").is_dir(): found += [directory for directory in (current / ".agents" / ".local", current / ".agents") if notes.note_files(directory) or (directory / LINKS).is_file()]   # the list is reversed below; config alone counts: [applies] with no notes
     if current == stop or current.parent == current: break
     current = current.parent
   return list(reversed(found))
@@ -97,9 +95,9 @@ def payload(path: Path, skip: set[Path] | None = None) -> tuple[str, list[str], 
   if not links: return "", [], []
 
   allowed, mention = [], []
-  nearest = next((agents_dir for agents_dir in reversed(links) if notes.note_files(agents_dir)), None)   # a config-only `.agents` is never nearest
+  nearest = next((owner(agents_dir) for agents_dir in reversed(links) if notes.note_files(agents_dir)), None)   # a config-only `.agents` is never nearest
   for agents_dir in reversed(links):
-    mode = toml(agents_dir).get("inject") or (settings["nearest"] if agents_dir == nearest else settings["ancestors"])
+    mode = toml(agents_dir).get("inject") or toml(owner(agents_dir)).get("inject") or (settings["nearest"] if owner(agents_dir) == nearest else settings["ancestors"])
     if mode == "none": continue
     names = INJECTABLE if mode == "full" else ("context",)
     allowed.append((agents_dir, names))
@@ -168,8 +166,14 @@ def parts(agents_dir: Path, name: str) -> list[tuple[Path, list[str]]]:
   return [(part, load(part).list("applies")) for part in sorted(split_dir.glob("*.md"))] if split_dir.is_dir() else []
 
 
+def owner(directory: Path) -> Path:
+  """The `.agents` a note directory belongs to: itself, or the one a `.local` sits in, so a `.local` takes its parent's inject mode, set or default."""
+  return directory.parent if directory.name == ".local" else directory
+
+
 def label(agents_dir: Path) -> str:
-  """A note directory's scope, repo-relative where possible, so injected text is the same wherever the hook ran."""
+  """A note directory's scope, repo-relative where possible, so injected text is the same wherever the hook ran; a `.local` is its parent's plus `/.local`."""
+  if agents_dir.name == ".local": return f"{label(agents_dir.parent)}/.local"
   scope = Path(agents_dir).parent
   root = git_root(scope)
 
@@ -186,7 +190,7 @@ def note_dirs_for(path: Path) -> list[Path]:
   """The note directories a path means: the `.agents` it is inside, else every one under it, else the nearest above."""
   start = Path(path).resolve()
   for directory in [start, *start.parents]:   # standing in a `.agents`, or in a split note under one
-    if directory.name == ".agents" and notes.note_files(directory): return [directory]
+    if notes.holds(directory) and notes.note_files(directory): return [directory]
   if under := find_note_dirs(start): return under
 
   current = start
@@ -206,8 +210,13 @@ def init(target: Path) -> dict:
   made = not agents_dir.is_dir()
   agents_dir.mkdir(parents=True, exist_ok=True)
 
-  added = [template.name for template in sorted((_profile.TEMPLATES / "agents").iterdir()) if not (agents_dir / template.name).exists()]
-  for name in added: (agents_dir / name).write_text((_profile.TEMPLATES / "agents" / name).read_text(encoding="utf-8").replace("{name}", target.name), encoding="utf-8")
+  added = []
+  for template in sorted((_profile.TEMPLATES / "agents").iterdir()):
+    file, text = agents_dir / template.name, template.read_text(encoding="utf-8").replace("{name}", target.name)
+    if not file.exists(): file.write_text(text, encoding="utf-8")
+    elif template.name == ".gitignore" and (lacking := [line for line in text.splitlines() if line not in (have := file.read_text(encoding="utf-8").splitlines())]): file.write_text("\n".join(have + lacking) + "\n", encoding="utf-8")   # an existing file stays as written; an ignore list gains the lines it lacks
+    else: continue
+    added.append(template.name)
   return {"path": str(agents_dir), "made": made, "added": added, "inherits": [label(ancestor) for ancestor in chain(target) if ancestor != agents_dir]}
 
 

@@ -10,14 +10,19 @@ kind: todo
 
 | section | line |
 |---|---|
-| 2026-10-05 | 22 |
-| 2026-10-03 | 31 |
-| 2026-09-25 | 38 |
+| 2026-10-10 | 23 |
+| 2026-10-05 | 27 |
+| 2026-10-03 | 36 |
+| 2026-09-25 | 43 |
 
 <!-- /map -->
 
 
 Moved out of [[todo]] as each finished. What any of it taught is in [[learned]]; this records that it happened.
+
+## 2026-10-10
+
+- [x] A gitignored `.agents/.local/` for machine-specific notes, laid out like its `.agents` and read right after it. `agent init` writes `.agents/.gitignore` from the template, ignoring `.local/` and `.reviews/`, and appends what an old one lacks.
 
 ## 2026-10-05
 
