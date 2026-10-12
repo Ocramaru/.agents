@@ -6,7 +6,7 @@ Author: Marco Cassar (@Ocramaru)
 import shlex
 from pathlib import Path
 
-from agentkit import doctor, guard, hooks, install, issue, profile, reviews, tree
+from agentkit import doctor, guard, hooks, install, issue, profile, reviews, tree, version
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli.out import done, escape, fail, line, note, report, table
 
@@ -99,7 +99,7 @@ def cmd_guard(args) -> int:
 @command("update", help="pull .agents and your profile")
 def cmd_update(args) -> int:
   """Pull the hub and the profile, fast-forward only, so a pull that needs a merge fails instead of merging."""
-  bad = 0
+  bad, was = 0, version()
   for name, where in ((".agents", profile.HUB), ("profile", profile.path())):
     if where is None or not (where / ".git").exists():
       line(f"skip   {name}: {'not a git repo' if where else 'none set'}")
@@ -109,6 +109,8 @@ def cmd_update(args) -> int:
     bad += pulled.returncode != 0
     said = (pulled.stderr or pulled.stdout).strip().splitlines()
     line(f"{'ok' if pulled.returncode == 0 else 'FAIL':<6} {name}: {said[-1] if said else 'up to date' if pulled.returncode == 0 else 'no output'}  ({where})")
+
+  if (now := version()) != was: line(f"       agentkit {was} -> {now}")
   return 1 if bad else 0
 
 

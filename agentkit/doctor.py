@@ -12,7 +12,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from agentkit import agents, backends, guard, hooks, inject, install, issue, mapblock, notes, profile, tree
+from agentkit import agents, backends, guard, hooks, inject, install, issue, mapblock, notes, profile, tree, version
 from agentkit.frontmatter import load
 from agentkit.profile import HUB
 from agentkit.standards import Library
@@ -21,7 +21,7 @@ MODES = ("full", "context", "none")   # what agents.toml `inject` may say
 
 def checks(root: Path = HUB) -> list[tuple[bool, str, str]]:
   """Every check as (ok, what was checked, what to do about it), roughly install-time to run-time."""
-  out = []
+  out = [(True, f"agentkit {version()}", "")]
 
   found = shutil.which("agent")
   out.append((bool(found and Path(found).resolve() == (root / "bin" / "agent").resolve()), f"`agent` on PATH -> {found or 'not found'}", "run `agent install`, and put ~/.local/bin on PATH"))

@@ -11,6 +11,8 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from agentkit import version
+
 GROUPS: dict[str, str] = {}   # group -> its line in `agent --help`, set by the module that holds its commands
 COMMANDS: list["Command"] = []
 DEFAULTS: dict[str, Callable] = {}   # group -> what bare `agent <group>` and `--list` run
@@ -54,7 +56,12 @@ def run(arguments: list[str] | None = None) -> int:
 
   A command typed alone that needs arguments prints its help. Positionals stranded after a flag go to its `variadic` list.
   """
+  if tuple(sys.argv[1:] if arguments is None else arguments) == ("--version",):   # before the parser, which every hook call would otherwise pay for
+    print(f"agentkit {version()}")
+    return 0
+
   parser = argparse.ArgumentParser(prog="agent")
+  parser.add_argument("--version", action="store_true", help="the version and commit this checkout is at")
   top = parser.add_subparsers(dest="cmd", required=True)
   nested, needs_arguments = {}, {}
 

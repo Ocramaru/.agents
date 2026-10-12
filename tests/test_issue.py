@@ -9,7 +9,7 @@ import json, socket, subprocess
 import pytest
 from conftest import git
 
-from agentkit import issue
+from agentkit import issue, version
 
 
 @pytest.fixture
@@ -28,7 +28,7 @@ def test_it_files_on_the_hub_naming_its_commit_and_nothing_private_and_the_same_
   """The report names the .agents commit, and the repo and hostname only with --context; a title already open gets a comment, matched on casefolded words."""
   elsewhere = git(tmp_path / "project")   # not the hub, which is where friction with it is met
   footer = lambda **options: issue.file("t", "", elsewhere, "Ocramaru/.agents", dry=True, **options)[1].split("\n\n")[-1]
-  assert footer().startswith(".agents at ") and "unknown" not in footer()   # HEAD resolves in .agents
+  assert footer().startswith(f"agentkit {version()}") and "unknown" not in footer()   # the version and HEAD resolve in .agents
   assert "project" not in footer() and socket.gethostname() not in footer()
   assert "met in project" in footer(context=True) and socket.gethostname() in footer(context=True)
   assert {call[1] for call in gh.calls} == {"list"}   # a dry run asks for nothing but the list
@@ -38,7 +38,7 @@ def test_it_files_on_the_hub_naming_its_commit_and_nothing_private_and_the_same_
   assert code == 0 and filed.endswith("/issues/1")
   create = next(call for call in gh.calls if call[1] == "create")
   assert create[create.index("--repo") + 1] == "Ocramaru/.agents"
-  assert ".agents at " in create[create.index("--body") + 1] and "project" not in create[create.index("--body") + 1]
+  assert f"agentkit {version()}" in create[create.index("--body") + 1] and "project" not in create[create.index("--body") + 1]
 
   gh.calls.clear()
   gh.replies["list"] = [{"number": 4, "title": "Close takes file line but open prints file", "url": "https://github.com/Ocramaru/.agents/issues/4"}]

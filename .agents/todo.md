@@ -11,13 +11,14 @@ kind: todo
 | section | line |
 |---|---|
 | Next | 19 |
-| Owed | 24 |
+| Owed | 25 |
 
 <!-- /map -->
 
 
 ## Next
 
+- [ ] Once it is verified good enough for others, ship `.agents` as a `uv tool install` rather than a clone, and only then start versioning: bump `version` in pyproject.toml and tag `vX.Y.Z` releases. Until then it stays 0.1.0, and `agent --version` names the commit.
 - [ ] Generate `~/.claude/agents/*.md` from `agents/*.md` at install time, for definitions that want the parent model to invoke them rather than a hook. Without it, native subagents drift as a second copy.
 - [ ] Prove the codex backend end to end. The event shapes are confirmed and unit-tested, but no real `agent sub run --backend codex` has been through resume yet.
 

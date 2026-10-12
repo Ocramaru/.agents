@@ -12,7 +12,7 @@ import socket
 import subprocess
 from pathlib import Path
 
-from agentkit import tree
+from agentkit import tree, version
 from agentkit.profile import HUB, git
 
 
@@ -58,7 +58,7 @@ def filed(repository: str) -> list[str]:
 def file(title: str, body: str, working_directory: Path, repository: str, dry: bool = False,
            context: bool = False) -> tuple[int, str]:
   """File it, or add to the open issue that already says it. Returns (exit code, what happened)."""
-  foot = f".agents at {git(HUB, "rev-parse", "--short", "HEAD").stdout.strip() or 'unknown'} · {platform.system()}"
+  foot = f"agentkit {version()} · {platform.system()}"
 
   if context:   # issues on .agents are public, and a hostname or a private repo's name is not theirs
     root = tree.git_root(working_directory)
