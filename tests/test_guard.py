@@ -50,6 +50,11 @@ def test_pre_commit_is_judged_by_what_its_config_runs(tmp_path):
   assert "ruff-format" in formatter("pre-commit run --all-files", SETTINGS, fmt)
 
 
+def test_the_shipped_list_lets_gofmt_run():
+  """Go's own formatter is its layout, so the go standard's `gofmt -w` is never refused."""
+  assert formatter("gofmt -w main.go", {**profile.section("guard"), "enabled": True}) is None and formatter("go fmt ./...", {**profile.section("guard"), "enabled": True}) is None
+
+
 def test_local_toml_and_then_a_repo_turn_it_off(tmp_path, monkeypatch):
   """A machine with no profile turns it on in local.toml; a fork whose upstream runs a formatter turns it off in its agents.toml."""
   monkeypatch.setattr(profile, "LOCAL", tmp_path / "local.toml")

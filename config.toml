@@ -31,9 +31,10 @@ ancestors = "context"   # same for ancestors: assumptions bind, findings do not
 # Commands the no-reformat hook refuses, once `enabled`. An entry's words lead the command, as globs, and
 # its flags appear anywhere in it: `ruff check --unsafe-fixes`. A profile or local.toml turns it on or
 # replaces a list; a repo's .agents/agents.toml can set `enabled = false` for itself.
+# gofmt is not listed: Go's formatter is the language's layout, not one a person keeps by hand.
 [guard]
 enabled = false
-formatters = ["black", "blacken-docs", "autopep8", "yapf", "blue", "isort", "prettier", "gofmt", "rustfmt", "clang-format", "swiftformat", "shfmt", "buildifier", "ruff format", "ruff check --unsafe-fixes", "cargo fmt", "go fmt", "mix format", "dprint fmt", "taplo fmt", "terraform fmt"]
+formatters = ["black", "blacken-docs", "autopep8", "yapf", "blue", "isort", "prettier", "rustfmt", "clang-format", "swiftformat", "shfmt", "buildifier", "ruff format", "ruff check --unsafe-fixes", "cargo fmt", "mix format", "dprint fmt", "taplo fmt", "terraform fmt"]
 targets = ["fmt", "format", "reformat"]   # names a script runner below runs, so `make fmt` is a formatter
 advice = "this layout is hand-maintained and a formatter undoes it. Lint with 'ruff check --fix' instead, and fix layout by hand in the surrounding file's idiom."
 # How a command runs without being named first: a runner stands in front of one, with any flags after it;
