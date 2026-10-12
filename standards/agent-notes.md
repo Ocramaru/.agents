@@ -55,6 +55,8 @@ Track what has been done here as it happens, and move finished items to `todo.ar
 
 A task that is really a finding belongs in `learned.md`. A task that is really an assumption belongs in `context.md`.
 
+A design too long for a task line goes in its own part, `todo/<name>.md`, linked from its task; once built, what it settled moves into `context.md` and the part into the archive.
+
 ## todo.archive.md
 
 Finished tasks, moved out of `todo.md` rather than deleted. Same format, newest at the top.
