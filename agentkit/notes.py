@@ -140,8 +140,8 @@ def split(path: Path) -> list[Path]:
   if head: keep += ([""] if keep else []) + [head]
 
   # context parts load on their own, so an index telling the reader to go and fetch them would lie
-  keep += ["", ("Split by section. A part naming `applies` is sent for those files; the rest are here to read:"
-                if path.stem == "context" else "Split by section. Read the one you need:"), ""]
+  keep += ([""] if keep else []) + [("Split by section. A part naming `applies` is sent for those files; the rest are here to read:"
+                                      if path.stem == "context" else "Split by section. Read the one you need:"), ""]
   keep += [f"- [{title}]({path.stem}/{part.name})" for title, part in written]
 
   path.write_text("\n".join(keep) + "\n", encoding="utf-8")

@@ -89,7 +89,9 @@ def repoint(old: Path | None) -> list[str]:
 def hooks(settings: Path) -> list[str]:
   """Replace the hooks block in Claude Code's settings.json whole, leaving every other key as it was."""
   ours = json.loads((HUB / "settings.hooks.json").read_text(encoding="utf-8"))
-  data = json.loads(settings.read_text(encoding="utf-8")) if settings.is_file() else {}
+  try: data = json.loads(settings.read_text(encoding="utf-8")) if settings.is_file() else {}
+  except ValueError: data = None
+  if not isinstance(data, dict): return [f"skip  hooks block: {home(settings)} is not a JSON object, so it is left as it is; fix it and run this again"]
   if data.get("hooks") == ours: return ["ok    hooks block in settings.json"]
 
   out = []

@@ -55,12 +55,12 @@ def save(where: Path) -> None:
   """
   line = f"path = {json.dumps(str(Path(where).expanduser().resolve()))}"
   text = LOCAL.read_text(encoding="utf-8") if LOCAL.is_file() else HEADER
-  table = re.search(r"(?ms)^\[profile\][ \t]*\n(.*?)(?=^\[|\Z)", text)
+  table = re.search(r"(?ms)^\[profile\][ \t]*(?:#[^\n]*)?\n(.*?)(?=^\[|\Z)", text)
 
   if table is None: text = f"{text.rstrip()}\n\n[profile]\n{line}\n"
   else:
     body = table.group(1)
-    body = (re.sub(r"(?m)^path\s*=.*$", lambda _: line, body, count=1) if re.search(r"(?m)^path\s*=", body)
+    body = (re.sub(r"(?m)^[ \t]*path\s*=.*$", lambda _: line, body, count=1) if re.search(r"(?m)^[ \t]*path\s*=", body)
             else f"{line}\n{body}")
     text = text[:table.start(1)] + body + text[table.end(1):]
   LOCAL.write_text(text, encoding="utf-8")

@@ -63,7 +63,8 @@ def _missing_model(args, backend, roles) -> int:
 @arg("--json", action="store_true", help="the result as JSON, for an agent to read")
 def cmd_run(args) -> int:
   definition = agents.definition(args.agent, agents.definitions())
-  body = agents.prompt([(path, Path(path).read_text(encoding="utf-8")) for path in args.paths if Path(path).is_file()], changed=args.changed)
+  if missing := [path for path in args.paths if not Path(path).is_file()]: return fail(f"no such file: {', '.join(missing)}", 2)
+  body = agents.prompt([(path, Path(path).read_text(encoding="utf-8")) for path in args.paths], changed=args.changed)
   if not body: return fail("nothing to check: pass --changed or some files", 2)
 
   root = tree.git_root(Path.cwd()) or Path.cwd()
@@ -128,11 +129,13 @@ def cmd_review(args) -> int:
   if args.agent != review.AUTO and args.agent not in found and args.agent not in kinds and Path(args.agent).exists():
     args.paths, args.agent = [args.agent, *args.paths], review.AUTO
 
+  if args.recheck and args.commit: return fail("--recheck reads the ledger and --commit reads a commit; use one", 2)
   if args.recheck or args.commit:
     root = tree.git_root(Path.cwd()) or Path.cwd()
     touched = profile.git(root, "diff-tree", "--no-commit-id", "--name-only", "-z", "-r", "--root", args.commit) if args.commit else None
     # NUL-separated: a whitespace split breaks a spaced path, and git quotes a non-ASCII one per line; a deleted file has nothing left to review
-    files, roots = [path for name in touched.stdout.split("\0") if name and (path := root / name).is_file()] if touched and touched.returncode == 0 else [], []
+    if touched and touched.returncode: return fail(f"git could not read {args.commit}: {touched.stderr.strip()}", 2)
+    files, roots = [path for name in touched.stdout.split("\0") if name and (path := root / name).is_file()] if touched else [], []
   else:
     given = [Path(path) for path in (args.paths or ["."])]
     missing = [path for path in given if not path.exists()]
@@ -158,10 +161,9 @@ def cmd_review(args) -> int:
     return fail("no agents to route to: set `agents` under [review] in config.toml", 2)
 
   # every route, not only discovery: a commit's file list and a named file arrive unfiltered
-  dropped = [file for file in files if review.skipped(file, root)]
+  dropped = {file: ignored for file in files if (ignored := review.skipped(file, root))}
   if dropped:
-    note(f"skipping {len(dropped)} file{'s' if len(dropped) != 1 else ''} under "
-         f"{', '.join(sorted({part for file in dropped for part in Path(file).parts[:-1] if tree.ignored(part)}))}")
+    note(f"skipping {len(dropped)} file{'s' if len(dropped) != 1 else ''} under {', '.join(sorted({name for ignored in dropped.values() for name in ignored}))}")
     files = [file for file in files if file not in dropped]
 
   if args.recheck and not args.paths and (here := _subfolder(root)):
@@ -259,6 +261,7 @@ def cmd_reviews(args) -> int:
 
   run = reviews.last_run(root) if args.last else args.run
   if (args.last or args.run) and not run: return fail("no run recorded yet: runs are tagged from this version on")
+  last = lambda rows: rows[-args.tail:] if args.tail > 0 else []   # [-0:] is everything
   keep = lambda rows: reviews.filtered(rows, root, agent=args.agent, path=args.path, failed=args.failed, run=run)
   if args.open_: return show.findings(keep(reviews.open_findings(root)), full=args.full)
 
@@ -267,12 +270,12 @@ def cmd_reviews(args) -> int:
   if not data: return fail(f"nothing matches in {reviews.path(root, create=False)}")
 
   if run or args.failed:   # what each said, the way a run prints it as it lands
-    for record in data if run else data[-args.tail:]: show.result(record)
+    for record in data if run else last(data): show.result(record)
     return 0
 
   when = lambda record: time.strftime("%Y-%m-%d %H:%M", time.localtime(record.get("at", 0)))
   return done(*(f"{when(record)}  {record.get('run') or '-':<14} {record.get('state', '?'):<14} {len(record.get('findings', [])):>3}  "
-                f"{record.get('file', '?')}  {record.get('agent', '')}" for record in data[-args.tail:]))
+                f"{record.get('file', '?')}  {record.get('agent', '')}" for record in last(data)))
 
 
 @command("close", help="close an open finding: fixed, wrong, or not worth fixing", group="sub")
@@ -310,7 +313,7 @@ def cmd_agents(args) -> int:
     for name in names:
       definition = found[name]
       role = definition.get("model")
-      rows.append([kind, name, f"{backend.spec.get("models", {}).get(role, "none").removeprefix("claude-")}\n[dim]{role}[/dim]", ", ".join(review.globs_of(definition, standards)) or "anything named", (definition.get("description") or "").split(". ", 1)[-1]])   # the model that runs, not only its role
+      rows.append([escape(kind), escape(name), f"{escape(backend.spec.get("models", {}).get(role, "none").removeprefix("claude-"))}\n[dim]{escape(role)}[/dim]", escape(", ".join(review.globs_of(definition, standards)) or "anything named"), escape((definition.get("description") or "").split(". ", 1)[-1])])   # the model that runs, not only its role
 
   return table(["kind", "agent", "model", "reads", "looks for"], rows,
                title=f"Review types on {backend.name}",
@@ -323,8 +326,8 @@ def cmd_agents(args) -> int:
 def cmd_backends(args) -> int:
   known, default = backends.load_backends()
   return table(["backend", "kind", "context", "models"],
-               [[f"{name}{' (default)' if name == default else ''}", backend.kind, "resumes" if backend.resumable else "replays",
-                 ", ".join(f"{role} {model}" for role, model in sorted(backend.spec.get("models", {}).items()))]
+               [[f"{escape(name)}{' (default)' if name == default else ''}", backend.kind, "resumes" if backend.resumable else "replays",
+                 escape(", ".join(f"{role} {model}" for role, model in sorted(backend.spec.get("models", {}).items())))]
                 for name, backend in sorted(known.items())], wide=("models",))
 
 

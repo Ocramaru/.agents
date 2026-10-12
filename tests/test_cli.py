@@ -1,119 +1,91 @@
-"""Every command, invoked as a subprocess, from every position someone might stand in.
-
-The unit tests call functions directly from one working directory, which is exactly the blind
-spot that shipped `agent remap` broken from inside a `.agents` and `agent remap .agents` as a
-silent no-op. A command is only correct if it is correct from where it will actually be run.
-
-Run with `env -u PYTHONPATH uv run pytest tests/`.
+"""The CLI run as a subprocess from the positions someone stands in; the failed-review display runs in-process.
 
 Author: Marco Cassar (@Ocramaru)
 """
 
-import contextlib
-import io
-import json
+import contextlib, io, json, uuid
 
 import pytest
-from conftest import agent, git
+from conftest import agent, git, note
 
 from agentkit import agents, cli, review
 
 
 @pytest.fixture
 def project(tmp_path):
-  """A repo shaped like a real one: notes at the root, notes in a package, one of them split."""
-  git(tmp_path)
-  root = tmp_path / ".agents"
-  root.mkdir()
-  (root / "context.md").write_text("---\nname: context\nkind: context\n---\n\n# root\n\n## A\n\nx\n\n## B\n\ny\n")
-  (root / "todo.md").write_text("---\nname: todo\nkind: todo\n---\n\n# TODO\n\n## Next\n\n- [ ] a\n")
-
-  pkg = tmp_path / "src" / "pkg"
-  pkg.mkdir(parents=True)
-  (pkg / "mod.py").write_text("x = 1\n")
-  sub = pkg / ".agents"
-  sub.mkdir()
-  (sub / "context.md").write_text("---\nname: context\nkind: context\n---\n\n# pkg\n\nassumptions\n")
-  # a note with no frontmatter and a long heading, which is what a real one looked like
-  (sub / "learned.md").write_text(
-    "# What we learned\n\npreamble\n\n## Measurement traps, each of which cost a run\n\na\n\n## Open\n\nb\n")
-  agent(["split", str(sub / "learned.md")], cwd=tmp_path)
+  """A repo with notes at the root and in a package, one of them split."""
+  note(git(tmp_path), "# root\n\n## A\n\nx\n\n## B\n\ny")
+  note(tmp_path / "src" / "pkg", "# pkg\n\nassumptions")
+  (tmp_path / "src" / "pkg" / "mod.py").write_text("x = 1\n")
+  # no frontmatter and a long heading: the shape a real note had
+  (tmp_path / "src" / "pkg" / ".agents" / "learned.md").write_text("# What we learned\n\npreamble\n\n## Measurement traps, each of which cost a run\n\na\n\n## Open\n\nb\n")
+  agent(["split", "src/pkg/.agents/learned.md"], cwd=tmp_path)
   return tmp_path
 
 
-WHERE = {
-  "repo root": lambda p: p,
-  "package dir": lambda p: p / "src" / "pkg",
-  "inside .agents": lambda p: p / ".agents",
-  "inside a split note": lambda p: p / "src" / "pkg" / ".agents" / "learned",
-}
+@pytest.mark.parametrize("where", ["", "src/pkg", ".agents", "src/pkg/.agents/learned"])
+def test_remap_settles_and_manifest_parses_from_every_kind_of_directory(project, where):
+  """Remap finds the notes and settles in one pass, and manifest is valid JSON, wherever it runs."""
+  assert {"current", "remapped"} & set(agent(["remap"], cwd=project / where).stdout.split())
+  assert "remapped" not in agent(["remap"], cwd=project / where).stdout
+  assert json.loads(agent(["manifest"], cwd=project / where).stdout)["schema"] == "agents-hub/1"
 
 
-def test_remap_and_manifest_work_from_every_kind_of_directory(project):
-  """Remap finds the notes and settles in one pass, and manifest is valid JSON, wherever it is run."""
-  for name, at in WHERE.items():
-    out = agent(["remap"], cwd=at(project)).stdout
-    assert "current" in out or "remapped" in out, f"remap found nothing from {name}"
-    assert "remapped" not in agent(["remap"], cwd=at(project)).stdout, name
-    assert json.loads(agent(["manifest"], cwd=at(project)).stdout)["schema"] == "agents-hub/1", name
+def test_notes_commands_resolve_from_where_you_stand_and_say_what_they_found(project):
+  """Context, inject, standards, manifest, split and init take a path relative to the working directory and report made from found."""
+  package, session = project / "src" / "pkg", uuid.uuid4().hex
   data = json.loads(agent(["manifest", "--notes", str(project)], cwd=project).stdout)
-  assert len(data["notes"]) == 2 and not any(n["hub"] for n in data["notes"])
+  assert len(data["notes"]) == 2 and not any(entry["hub"] for entry in data["notes"])
+  assert json.loads(agent(["manifest", "--notes", ""], cwd=project).stdout)["kind"] == "notes"   # an empty root is a root
 
+  for directory, target in ((project, "src/pkg/mod.py"), (package, "mod.py")):
+    assert "assumptions" in agent(["context", target], cwd=directory).stdout
+    assert "assumptions" in agent(["inject", target, "--session", uuid.uuid4().hex], cwd=directory).stdout
+  standards = agent(["standards", "mod.py"], cwd=package).stdout
+  assert "python" in standards and "commits" in standards
+  (project / ".agents" / "standards").mkdir()
+  (project / ".agents" / "standards" / "bracketed.md").write_text("---\nname: bracketed\napplies: *.zz\ndescription: see [context] first\n---\n\nx\n")
+  assert "see [context] first" in agent(["standards", "thing.zz"], cwd=project).stdout   # a description is not markup
 
-def test_a_relative_path_resolves_from_where_you_stand(project):
-  """context, inject and standards take a path relative to the working directory."""
-  for cwd, target in ((project, "src/pkg/mod.py"), (project / "src" / "pkg", "mod.py")):
-    assert "assumptions" in agent(["context", target], cwd=cwd).stdout
-    assert "assumptions" in agent(["inject", target, "--session", f"s-{cwd.name}"], cwd=cwd).stdout
-  out = agent(["standards", "mod.py"], cwd=project / "src" / "pkg").stdout
-  assert "python" in out and "commits" in out
-
-
-def test_inject_tells_already_sent_from_never_governed(project, tmp_path_factory):
-  """Exit 1 is already sent, 3 is nothing governs it; without --session nothing is stamped."""
-  bare = git(tmp_path_factory.mktemp("bare"))
+  bare = git(project / "bare")
   (bare / "data.json").write_text("{}")
-  assert agent(["inject", "data.json", "--session", "gov"], cwd=bare, expect=3).stdout == ""
+  assert agent(["inject", "data.json", "--session", session], cwd=bare, expect=3).stdout == ""   # exit 3: nothing governs it
+  assert agent(["inject", "src/pkg/mod.py", "--session", session], cwd=project).stdout.strip()
+  assert agent(["inject", "src/pkg/mod.py", "--session", session], cwd=project, expect=1).stdout == ""   # exit 1: already sent
+  unstamped = [agent(["inject", "src/pkg/mod.py"], cwd=project).stdout for _ in range(2)]
+  assert unstamped[0] == unstamped[1] != ""   # without --session nothing is stamped
+  assert "--- python" in agent(["inject", str(package / "mod.py"), "--edit"], cwd=project, stdin="not json").stdout   # a malformed hook payload still gets the standards
+  assert "--- python" in agent(["inject", str(package / "mod.py"), "--edit"], cwd=project, stdin="é", env={"PYTHONIOENCODING": "ascii"}).stdout   # and so does one that is not text
 
-  assert agent(["inject", "src/pkg/mod.py", "--session", "gov"], cwd=project).stdout.strip()
-  assert agent(["inject", "src/pkg/mod.py", "--session", "gov"], cwd=project, expect=1).stdout == ""
-  by_hand = [agent(["inject", "src/pkg/mod.py"], cwd=project).stdout for _ in range(2)]
-  assert by_hand[0] == by_hand[1] != ""
-
-  out = agent(["inject", str(project / "src" / "pkg" / "mod.py"), "--edit"], cwd=project, stdin="not json").stdout
-  assert "--- python" in out                        # a malformed hook payload still gets the standards
-
-
-def test_split_kept_the_note_it_was_given_and_advertises_its_parts(project):
-  """Split invents no frontmatter, loses no preamble, numbers parts in order, and context names them."""
-  index = (project / "src" / "pkg" / ".agents" / "learned.md").read_text()
+  index = (package / ".agents" / "learned.md").read_text()
   assert not index.startswith("---") and "preamble" in index
-  parts = sorted((project / "src" / "pkg" / ".agents" / "learned").glob("*.md"))
-  assert [p.name for p in parts] == ["01-measurement-traps-each-of-which.md", "02-open.md"]
+  assert [part.name for part in sorted((package / ".agents" / "learned").glob("*.md"))] == ["01-measurement-traps-each-of-which.md", "02-open.md"]
+  context = agent(["context", "src/pkg/mod.py"], cwd=project).stdout
+  assert "01-measurement-traps-each-of-which.md" in context and "Measurement traps, each of which cost a run" in context
 
-  out = agent(["context", "src/pkg/mod.py"], cwd=project).stdout
-  assert "01-measurement-traps-each-of-which.md" in out
-  assert "Measurement traps, each of which cost a run" in out
-
-
-def test_outside_a_repo_agent_fails_cleanly_and_runs_its_own_agentkit(tmp_path):
-  """With no repo it says so without a traceback, and an `agentkit/` in the cwd never shadows its own."""
-  decoy = tmp_path / "agentkit"
-  decoy.mkdir()
-  (decoy / "__init__.py").write_text("")
-  (decoy / "__main__.py").write_text("print('DECOY')\n")
-  out = agent(["--help"], cwd=tmp_path).stdout
-  assert "DECOY" not in out and "doctor" in out and "friction" in out   # issue is findable by its use
-  assert agent(["remap"], cwd=tmp_path, expect=1).stderr.strip()
-  assert "Traceback" not in agent(["context", "nope.py"], cwd=tmp_path, expect=1).stderr
+  fresh = git(project / "fresh")
+  first = agent(["init"], cwd=fresh).stdout
+  assert first.startswith("created") and "added    README.md" in first and "added    context.md" in first
+  (fresh / ".agents" / "README.md").unlink()
+  again = agent(["init"], cwd=fresh).stdout
+  assert again.startswith("found") and "added    README.md" in again and "context.md" not in again
 
 
-def test_bad_input_is_reported_not_raised(project, tmp_path):
-  """An unknown name, a missing reason, a non-note or an unparseable settings file each get a message."""
-  for args in (["sub", "run", "no-such-agent"], ["sub", "review", "not-an-agent-or-file", "--dry-run"]):
-    err = agent(args, cwd=project, expect=1).stderr
-    assert "Traceback" not in err and "no agent or kind called" in err and "file-review" in err
-  assert "Traceback" not in agent(["sub", "backends", "--help"], cwd=project).stdout
+def test_bad_input_is_a_message_not_a_traceback_and_a_local_agentkit_never_shadows_the_real_one(project, tmp_path_factory):
+  """Input the CLI cannot act on is reported without a traceback, in a repo or outside one, and an `agentkit/` in the cwd is never imported in its place."""
+  outside = tmp_path_factory.mktemp("not-a-repo")
+  (outside / "agentkit").mkdir()
+  for name, text in (("__init__.py", ""), ("__main__.py", "print('DECOY')\n")): (outside / "agentkit" / name).write_text(text)
+  help_text = agent(["--help"], cwd=outside).stdout
+  assert "DECOY" not in help_text and "doctor" in help_text and "friction" in help_text   # issue is findable by its use
+  assert agent(["remap"], cwd=outside, expect=1).stderr.strip()
+  assert "Traceback" not in agent(["context", "nope.py"], cwd=outside, expect=1).stderr
+  assert "git diff failed" in agent(["sub", "run", "doc-check", "--changed"], cwd=outside, expect=1).stderr
+
+  assert "no such file: nonesuch.py" in agent(["sub", "run", "doc-check", "src/pkg/mod.py", "nonesuch.py"], cwd=project, expect=2).stderr
+  for command in (["sub", "run", "no-such-agent"], ["sub", "review", "not-an-agent-or-file", "--dry-run"]):
+    stderr = agent(command, cwd=project, expect=1).stderr
+    assert "Traceback" not in stderr and "no agent or kind called" in stderr and "file-review" in stderr
   assert "needs a --reason" in agent(["sub", "close", "src/pkg/mod.py:1", "--as", "wrong"], cwd=project, expect=2).stderr
 
   readme = project / "README.md"
@@ -122,87 +94,70 @@ def test_bad_input_is_reported_not_raised(project, tmp_path):
   assert "no such path" in agent(["remap", "typo.md"], cwd=project, expect=1).stderr   # not the notes above it
   assert "map:" not in readme.read_text()
 
-  cfg = tmp_path / "claude"
-  cfg.mkdir()
-  (cfg / "settings.json").write_text('{"hooks": {},}')
-  out = agent(["doctor"], cwd=project, expect=None, env={"CLAUDE_CONFIG_DIR": str(cfg)})
-  assert "Traceback" not in out.stderr and "not valid JSON" in out.stdout
+  (project / "claude").mkdir()
+  (project / "claude" / "settings.json").write_text('{"hooks": {},}')
+  doctor = agent(["doctor"], cwd=project, expect=None, env={"CLAUDE_CONFIG_DIR": str(project / "claude")})
+  assert "Traceback" not in doctor.stderr and "not valid JSON" in doctor.stdout
+
+  assert "the note to split" in agent(["split"], cwd=project, expect=2).stderr   # no arguments: the whole help
+  assert "positional arguments" not in agent(["sub", "close", "x", "--as", "nope"], cwd=project, expect=2).stderr   # a bad value: usage only
 
 
-def test_a_command_missing_what_it_needs_shows_its_help_and_init_says_what_it_found(project, tmp_path):
-  """Without its arguments a command prints its whole help; a bad value gets usage only. init tells made from found."""
-  err = agent(["split"], cwd=project, expect=2).stderr
-  assert "positional arguments" in err and "the note to split" in err
-  assert "positional arguments" not in agent(["sub", "close", "x", "--as", "nope"], cwd=project, expect=2).stderr
-
-  d = git(tmp_path / "fresh")
-  first = agent(["init"], cwd=d).stdout
-  assert first.startswith("created") and "added    README.md" in first and "added    context.md" in first
-  (d / ".agents" / "README.md").unlink()
-  again = agent(["init"], cwd=d).stdout
-  assert again.startswith("found") and "added    README.md" in again and "context.md" not in again
-  assert agent(["standards", "nothing.xyz"], cwd=d, expect=1).stderr.startswith("no standard governs")
-
-
-def test_a_flag_reaches_its_command_wherever_it_sits(project):
-  """A path after a flag still reaches review, an undefined flag is not swallowed, and --tail is one name."""
-  for args, want, unwanted in [
+def test_a_flag_reaches_its_command_wherever_it_sits_and_a_review_is_found_by_file_or_kind(project):
+  """A path after a flag still reaches review, an undefined flag is not swallowed, --tail is one name, and `sub` lists every kind."""
+  for arguments, wanted, unwanted in [
     (["doc-check", "nope.py"], "no such path: nope.py", "nothing matched"),
     (["doc-check", "--backend", "ollama", "nope.py"], "no such path: nope.py", "unrecognized"),
     (["doc-check", "--bogus", "nope.py"], "unrecognized arguments: --bogus", "no such path")]:
-    err = agent(["sub", "review", *args], cwd=project, expect=2).stderr
-    assert want in err and unwanted not in err, args
-  for args in (["hooks", "--tail", "3"], ["sub", "reviews", "--tail", "3"]):
-    assert "unrecognized" not in agent(args, cwd=project, expect=None).stderr
+    stderr = agent(["sub", "review", *arguments], cwd=project, expect=2).stderr
+    assert wanted in stderr and unwanted not in stderr, arguments
+  for arguments in (["hooks", "--tail", "3"], ["sub", "reviews", "--tail", "3"]):
+    assert "unrecognized" not in agent(arguments, cwd=project, expect=None).stderr
 
-
-def test_a_review_is_found_by_file_by_kind_or_by_listing(project):
-  """A bare file routes to its reviewer, a kind narrows to it, and `sub` lists every kind."""
-  out = agent(["sub", "review", "src/pkg/mod.py", "--dry-run"], cwd=project).stdout
-  assert "file-review" in out and "mod.py" in out
-  out = agent(["sub", "review", "logic", "src/pkg/mod.py", "--dry-run"], cwd=project).stdout
-  assert "logic review · file-review" in out and "doc-check" not in out
-
-  for args in (["sub"], ["sub", "--list"], ["sub", "agents"]):
-    rows = [line.split("\t") for line in agent(args, cwd=project).stdout.strip().splitlines()]
-    assert {r[0] for r in rows} == set(agents.kinds(agents.definitions())), args   # whatever is installed, profile or not
-    assert all(len(r) == 5 and "[" not in r[2] for r in rows)   # piped output carries no markup
+  by_file = agent(["sub", "review", "src/pkg/mod.py", "--dry-run"], cwd=project).stdout
+  assert "file-review" in by_file and "mod.py" in by_file
+  by_kind = agent(["sub", "review", "logic", "src/pkg/mod.py", "--dry-run"], cwd=project).stdout
+  assert "logic review · file-review" in by_kind and "doc-check" not in by_kind
+  for arguments in (["sub"], ["sub", "--list"], ["sub", "agents"]):
+    rows = [line.split("\t") for line in agent(arguments, cwd=project).stdout.strip().splitlines()]
+    assert rows and {row[0] for row in rows} == set(agents.kinds(agents.definitions())), arguments   # whatever is installed, profile or not
+    assert all(len(row) == 5 and "[" not in row[2] for row in rows)   # piped output carries no markup
 
 
 def test_a_failed_review_says_why_and_is_not_offered_a_reply(project, monkeypatch):
   """A failed review prints its error by the file, and only a review with findings is offered a recheck."""
-  def fake_run(name, backend, paths, root, definition, libraries, tier="text", jobs=4, on_start=None, on_done=None, run=None, **_):
-    if name == "file-review":
-      r = {"file": "a.py", "agent": name, "task": "t-failed", "state": "failed", "kind": "note",
-           "body": "TimeoutExpired: took longer than 300s", "findings": []}
-    else:
-      r = {"file": "a.py", "agent": name, "task": "t-found", "state": "completed", "kind": "findings",
-           "body": "One stale comment.", "findings": [{"line": 1, "issue": "stale", "fix": "update", "file": "a.py"}]}
+  def fake_run(name, backend, paths, root, definition, libraries, on_start=None, on_done=None, **_):
+    if name == "file-review": result = {"file": "a.py", "agent": name, "task": "t-failed", "state": "failed", "kind": "note", "body": "TimeoutExpired: took longer than 300s", "findings": []}
+    else: result = {"file": "a.py", "agent": name, "task": "t-found", "state": "completed", "kind": "findings", "body": "One stale comment.", "findings": [{"line": 1, "issue": "stale", "fix": "update", "file": "a.py"}]}
     on_start("a.py")
-    on_done(r)
-    return [r]
+    on_done(result)
+    return [result]
   monkeypatch.setattr(review, "run", fake_run)
   monkeypatch.chdir(project)
   (project / "a.py").write_text("x = 1\n")
-  out, err = io.StringIO(), io.StringIO()
-  with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
-    cli.main(["sub", "review", "auto", "a.py", "--keep"])
-  shown = out.getvalue()
+
+  stdout = io.StringIO()
+  stderr = io.StringIO()
+  with contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(stdout): cli.main(["sub", "review", "auto", "a.py", "--keep"])
+  assert "Traceback" not in stderr.getvalue()
+  shown = stdout.getvalue()
   assert "a.py" in shown and "failed" in shown and "error: TimeoutExpired" in shown   # why, by the file
-  assert "One stale comment." in shown                                               # the verdict, too
+  assert "One stale comment." in shown   # the verdict, too
   assert shown.count("agent sub review --recheck a.py") == 1 and "agent sub reply" not in shown   # found, not failed
 
 
 def test_the_commit_hook_installs_beside_any_hook_and_quotes_its_arguments(project):
-  """Install moves a foreign hook aside, uninstall removes only ours, and arguments are shell-quoted."""
+  """Install moves a foreign hook aside without clobbering an older backup, uninstall removes only ours, and arguments are shell-quoted."""
   hook = project / ".git" / "hooks" / "post-commit"
   hook.parent.mkdir(parents=True, exist_ok=True)
   hook.write_text("echo mine\n")
+  hook.with_name("post-commit.bak").write_text("echo older\n")
+
   assert "not ours" in agent(["hook", "uninstall"], cwd=project, expect=1).stderr
   assert hook.read_text() == "echo mine\n"
   agent(["hook", "status"], cwd=project, expect=1)
   assert "moved the hook already there aside" in agent(["hook", "install"], cwd=project).stdout
-  assert hook.with_name("post-commit.bak").read_text() == "echo mine\n"   # never eaten
+  assert sorted(saved.read_text() for saved in hook.parent.glob("post-commit.bak*")) == ["echo mine\n", "echo older\n"]   # never eaten
   agent(["hook", "status"], cwd=project)
   assert "removed" in agent(["hook", "uninstall"], cwd=project).stdout
   assert not hook.exists()

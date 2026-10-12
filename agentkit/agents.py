@@ -56,8 +56,9 @@ def instructions(definition: Doc, library: Library | None = None, path: Path | s
 def prompt(files: list[tuple[str, str]], changed: bool = False) -> str:
   """The prompt body: the diff if `changed`, then each (path, text) numbered."""
   parts = []
-  if changed and (diff := subprocess.run(["git", "diff", "--unified=3", "HEAD"], capture_output=True, check=False, text=True).stdout.strip()):
-    parts.append(f"--- working diff ---\n{diff}")
+  if changed and (diff := subprocess.run(["git", "diff", "--unified=3", "HEAD"], capture_output=True, check=False, text=True)).returncode != 0:
+    raise SystemExit(f"git diff failed, so there is no working diff to send: {diff.stderr.strip()}")
+  if changed and diff.stdout.strip(): parts.append(f"--- working diff ---\n{diff.stdout.strip()}")
 
   for path, text in files: parts.append(f"--- file: {path} ---\n{"\n".join(f"{number:>5}\t{line}" for number, line in enumerate(text.splitlines(), 1))}")
 

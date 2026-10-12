@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Standards and .agents notes for the file being edited, resolved in one call.
-# Everything with logic lives in agentkit; this only moves bytes.
+# Everything with logic lives in agentkit; this moves bytes and counts the delimiters it writes for the one-line notice.
 set -euo pipefail
 . "$HOME/.agents/hooks/log.sh"
 
@@ -49,25 +49,23 @@ hook_log inject "$session" "sent   ${#text} bytes  $path"
 # shown to nobody, so without this an edit that loaded five standards looks exactly like one that
 # loaded nothing. Counted off the delimiters agentkit already writes; set AGENTS_HOOK_QUIET=1 to
 # turn it off.
-if [ "${AGENTS_HOOK_QUIET:-0}" = "1" ]; then
-  jq -n --arg t "$text" '{hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $t}}'
-  exit 0
+message=""
+if [ "${AGENTS_HOOK_QUIET:-0}" != "1" ]; then
+  # one pass over the text rather than four greps: this runs on every edit that was not gated
+  read -r rules notes open drops < <(printf '%s\n' "$text" | awk '
+    /^--- [a-z.-]+ \([^)]+\) ---$/ { r++ }   /^--- .*\.md ---$/ { n++ }
+    /^Open review findings/ { o++ }          /^This edit removes / { d++ }
+    END { print r+0, n+0, o+0, d+0 }')
+
+  parts=""
+  [ "$rules" -gt 0 ] && parts="$rules standard$([ "$rules" = 1 ] || echo s)"
+  [ "$notes" -gt 0 ] && parts="${parts:+$parts, }$notes note$([ "$notes" = 1 ] || echo s)"
+  [ "$open" -gt 0 ] && parts="${parts:+$parts, }open findings"
+  # worth its own words rather than counting as context: it is the one part that is about the edit
+  [ "$drops" -gt 0 ] && parts="${parts:+$parts, }a task leaving todo.md unarchived"
+
+  # bytes under a kilobyte: "(0k)" read as nothing delivered, and one session went looking for the rest
+  if [ "${#text}" -lt 1024 ]; then size="${#text} B"; else size="$(( ${#text} / 1024 ))k"; fi
+  message=".agents loaded ${parts:-context} for ${path##*/} ($size)"
 fi
-
-# one pass over the text rather than four greps: this runs on every edit that was not gated
-read -r rules notes open drops < <(printf '%s\n' "$text" | awk '
-  /^--- [a-z.-]+ \([^)]+\) ---$/ { r++ }   /^--- .*\.md ---$/ { n++ }
-  /^Open review findings/ { o++ }          /^This edit removes / { d++ }
-  END { print r+0, n+0, o+0, d+0 }')
-
-parts=""
-[ "$rules" -gt 0 ] && parts="$rules standard$([ "$rules" = 1 ] || echo s)"
-[ "$notes" -gt 0 ] && parts="${parts:+$parts, }$notes note$([ "$notes" = 1 ] || echo s)"
-[ "$open" -gt 0 ] && parts="${parts:+$parts, }open findings"
-# worth its own words rather than counting as context: it is the one part that is about the edit
-[ "$drops" -gt 0 ] && parts="${parts:+$parts, }a task leaving todo.md unarchived"
-
-# bytes under a kilobyte: "(0k)" read as nothing delivered, and one session went looking for the rest
-if [ "${#text}" -lt 1024 ]; then size="${#text} B"; else size="$(( ${#text} / 1024 ))k"; fi
-jq -n --arg t "$text" --arg m ".agents loaded ${parts:-context} for ${path##*/} ($size)" \
-  '{systemMessage: $m, hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $t}}'
+jq -n --arg t "$text" --arg m "$message" '{hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $t}} + (if $m == "" then {} else {systemMessage: $m} end)'

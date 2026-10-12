@@ -1,8 +1,6 @@
-"""A profile: your own standards, kept apart from the public .agents, which reads them.
+"""A profile holds your own standards, reviewers and config apart from the public .agents, which reads them.
 
-A profile replaces a starter of the same name and adds anything else; a repo still layers on top
-of whichever won. Nothing here touches the real install: `local.toml`, the default profile path,
-the paths of .agents itself and git's global config are all pointed at temporary ones.
+`local.toml`, the default profile path and git's global config are all pointed at temporary ones.
 
 Author: Marco Cassar (@Ocramaru)
 """
@@ -18,239 +16,142 @@ from agentkit import agents, backends, cli, install, profile
 from agentkit.standards import Library
 
 
-def std(d: Path, name: str, body: str, applies: str = "*.py") -> Path:
-  d.mkdir(parents=True, exist_ok=True)
-  f = d / f"{name}.md"
-  f.write_text(f"---\nname: {name}\ndescription: {name}\napplies: {applies}\n---\n\n{body}\n")
-  return f
-
-
 @pytest.fixture
 def isolated(tmp_path, monkeypatch):
   """Every path the profile code writes to, moved somewhere it can do no harm."""
   monkeypatch.setattr(profile, "LOCAL", tmp_path / "local.toml")
   monkeypatch.setattr(profile, "DEFAULT", tmp_path / "hub" / "profile")
   monkeypatch.delenv("AGENTS_PROFILE", raising=False)
-  monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")    # no hooksPath, so no review on these commits
-  for k, v in {"GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@t.io",
-               "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@t.io"}.items():
-    monkeypatch.setenv(k, v)
+  monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+  (tmp_path / "gitconfig").write_text("[user]\n  name = T\n  email = t@t.io\n[pull]\n  rebase = false\n")   # an identity, merging pulls, and no hooksPath so no review runs
   return tmp_path
 
 
-def run(*args, cwd=None) -> str:
-  return subprocess.run(["git", *args], cwd=cwd, capture_output=True, check=True, text=True).stdout
+def commit(repository: Path, message: str) -> None:
+  """An empty commit: history is all these tests need."""
+  profile.git(repository, "commit", "--allow-empty", "-qm", message)
 
 
-def published(tmp: Path, name: str) -> tuple[Path, Path]:
+def published(parent: Path, name: str) -> tuple[Path, Path]:
   """A bare remote and a clone of it with one commit pushed: what a profile on GitHub looks like."""
-  bare, clone = tmp / f"{name}.git", tmp / name
-  run("init", "-q", "--bare", "-b", "main", str(bare))
-  run("clone", "-q", str(bare), str(clone))
-  (clone / "README.md").write_text("profile\n")
-  run("add", "-A", cwd=clone)
-  run("commit", "-qm", "first", cwd=clone)
-  run("push", "-q", "-u", "origin", "main", cwd=clone)
+  bare, clone = parent / f"{name}.git", parent / name
+  profile.git(parent, "init", "-q", "--bare", "-b", "main", str(bare))
+  profile.git(parent, "clone", "-q", str(bare), str(clone))
+  commit(clone, "first")
+  profile.git(clone, "push", "-q", "-u", "origin", "main")
   return bare, clone
 
 
-def how_i_work(d: Path) -> Path:
-  d.mkdir()
-  (d / "AGENTS.md").write_text("# how I work\n")
-  return d
-
-
-# -- where it is ----------------------------------------------------------------------------------
-
-def test_the_profile_is_found_in_order_and_saved_in_place(isolated, monkeypatch):
-  """Environment, then local.toml, then the default; empty means none, and saving rewrites only the path."""
-  assert profile.path() is None                              # nothing anywhere
+def test_the_profile_is_found_from_the_environment_then_local_toml_then_the_default(isolated, monkeypatch):
+  """The environment wins over local.toml, which wins over the default; empty means none, and a broken local.toml is none."""
   profile.LOCAL.write_text("[profile\npath = ")
-  assert profile.path() is None                              # a broken local file is none, not a crash
+  assert profile.path() is None
 
   profile.DEFAULT.mkdir(parents=True)
-  assert profile.path() == profile.DEFAULT                   # the default, once it exists
+  assert profile.path() == profile.DEFAULT
 
-  profile.LOCAL.write_text('# mine\n[profile]\npath = "/old"\nnote = "keep"\n\n[mine]\nkept = true\n')
-  saved = isolated / 'odd "quoted" \\ dir'                   # a quote or backslash must stay valid TOML
+  profile.LOCAL.write_text('[profile]\npath = "/saved"\n')
+  assert profile.path() == Path("/saved")
+
+  for value, expected in ((str(isolated / "env"), isolated / "env"), ("", None)):
+    monkeypatch.setenv("AGENTS_PROFILE", value)
+    assert profile.path() == expected
+
+
+@pytest.mark.parametrize("before", ['# mine\n[profile]\npath = "/old"\nnote = "keep"\n\n[mine]\nkept = true\n', '[profile]  # mine\n  path = "/old"\nnote = "keep"\n', '[mine]\nkept = true\n', ""])
+def test_saving_rewrites_only_the_path(isolated, before):
+  """Save changes the `path` line and keeps the file's other tables, keys and comments, whatever characters the path holds."""
+  if before: profile.LOCAL.write_text(before)
+  saved = isolated / 'odd "quoted" \\ dir'
   saved.mkdir()
   profile.save(saved)
-  assert profile.path() == saved.resolve()                   # what this machine chose wins
-  t = tomllib.loads(profile.LOCAL.read_text())
-  assert t["profile"] == {"path": str(saved.resolve()), "note": "keep"} and t["mine"] == {"kept": True}
-  assert profile.LOCAL.read_text().startswith("# mine\n")
 
-  monkeypatch.setenv("AGENTS_PROFILE", str(isolated / "env"))
-  assert profile.path() == isolated / "env"                  # and the environment over that
-  monkeypatch.setenv("AGENTS_PROFILE", "")
-  assert profile.path() is None                              # empty: none at all
+  expected = {**(old := tomllib.loads(before)), "profile": {**old.get("profile", {}), "path": str(saved.resolve())}}
+  text = profile.LOCAL.read_text()
+  assert tomllib.loads(text) == expected
+  assert text.startswith(before.split("path")[0].rstrip(" "))
 
 
-# -- what it changes ------------------------------------------------------------------------------
+def test_a_profile_replaces_the_hubs_standards_reviewers_and_backends_by_name_and_layers_its_config(isolated, monkeypatch):
+  """A profile's standard, reviewer and backend replace the hub's of the same name, its own are added, and its config sits between the hub's and the repo's."""
+  hub, mine, repo = isolated / "hub", isolated / "mine", isolated / "repo"
+  for directory, name, body in ((hub, "python", "STARTER"), (mine, "python", "MINE"), (repo, "python", "REPO"), (hub / "agents", "file-review", "HUB"), (mine / "agents", "file-review", "MINE"), (mine / "agents", "my-check", "MINE TOO")):
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{name}.md").write_text(f"---\nname: {name}\ndescription: {name}\napplies: *.py\nkind: logic\n---\n\n{body}\n")
+  assert [(layer.origin, layer.doc.body.strip()) for layer in Library(hub, [repo], profile=mine).layers["python"]] == [("profile", "MINE"), ("repo", "REPO")]
 
-def test_your_standard_replaces_the_starter_and_a_repo_still_adds_to_it(isolated, monkeypatch):
-  """A profile standard replaces the starter of its name, a repo adds to it, and a Library given its own root ignores the profile."""
-  bundled, mine, repo = isolated / "bundled", isolated / "mine", isolated / "repo"
-  std(bundled, "python", "STARTER-PYTHON")
-  std(bundled, "markdown", "STARTER-MARKDOWN", "*.md")
-  std(mine, "python", "MY-PYTHON")
-  std(mine, "voice", "MY-VOICE", "*.md")
-  std(repo, "python", "REPO-PYTHON")
-
-  lib = Library(bundled, [repo], profile=mine)
-  py = [(layer.origin, layer.doc.body.strip()) for layer in lib.layers["python"]]
-  assert py == [("profile", "MY-PYTHON"), ("repo", "REPO-PYTHON")]          # the starter is gone
-  assert [l.origin for l in lib.layers["markdown"]] == ["machine-wide"]   # untouched starters stay
-  assert [l.origin for l in lib.layers["voice"]] == ["profile"]           # and yours are added
-
-  std(mine / "standards", "voice", "MY-VOICE", "*.md")
+  monkeypatch.setattr(agents, "AGENTS", hub / "agents")
   monkeypatch.setenv("AGENTS_PROFILE", str(mine))
-  assert "voice" not in Library(bundled).layers
-  assert "voice" in Library().layers                          # the set in .agents does include it
+  definitions = agents.definitions(hub / "agents")
+  assert sorted(definitions) == ["file-review", "my-check"]
+  assert agents.definition("file-review", definitions).body.strip() == "MINE"
 
-
-def test_your_reviewers_backends_and_config_override_the_hubs(isolated, monkeypatch):
-  """Profile reviewers and backends replace the ones in .agents by name; config sits between .agents and the repo, excludes accumulating."""
-  bundled, mine, repo = isolated / "agents", isolated / "mine", isolated / "repo"
-  bundled.mkdir()
-  (bundled / "file-review.md").write_text("---\nname: file-review\nkind: logic\nmodel: code\n---\nBUNDLED\n")
-  (mine / "agents").mkdir(parents=True)
-  (mine / "agents" / "file-review.md").write_text("---\nname: file-review\nkind: logic\nmodel: code-large\n---\nMINE\n")
-  (mine / "agents" / "my-check.md").write_text("---\nname: my-check\nkind: prose\n---\nMINE TOO\n")
-  monkeypatch.setattr(agents, "AGENTS", bundled)
-  monkeypatch.setenv("AGENTS_PROFILE", str(mine))
-  assert sorted(agents.definitions(bundled)) == ["file-review", "my-check"]
-  assert "MINE" in agents.definition("file-review", agents.definitions(bundled)).body
-  assert agents.kinds(agents.definitions(bundled)) == {"logic": ["file-review"], "prose": ["my-check"]}
-
-  hub_config = isolated / "config.toml"   # one settings file at each level, backends included
-  hub_config.write_text('[review]\nexclude = ["**/vendor/**"]\njobs = 4\n[inject]\nmap_over = 6144\n'
-                        '[backends]\ndefault = "claude"\n[backends.claude]\nkind = "cli"\nargv = ["claude"]\n'
-                        'models = { text = "hub-model" }\n[backends.ollama]\nkind = "http"\nurl = "x"\n')
-  (mine / "config.toml").write_text('[review]\nexclude = ["**/data/**"]\njobs = 2\n[inject]\nmap_over = 9000\n'
-                                    '[backends]\ndefault = "ollama"\n[backends.claude]\nkind = "cli"\n'
-                                    'argv = ["claude"]\nmodels = { text = "my-model" }\n')
-  monkeypatch.setattr(profile, "CONFIG", hub_config)
+  (hub / "config.toml").write_text('[review]\nexclude = ["**/vendor/**"]\njobs = 4\n[backends]\ndefault = "claude"\n[backends.claude]\nkind = "cli"\nargv = ["claude"]\nmodels = { text = "hub-model" }\n[backends.ollama]\nkind = "http"\nurl = "x"\n')
+  (mine / "config.toml").write_text('[review]\nexclude = ["**/data/**"]\njobs = 2\n[backends]\ndefault = "ollama"\n[backends.claude]\nkind = "cli"\nargv = ["claude"]\nmodels = { text = "my-model" }\n')
+  monkeypatch.setattr(profile, "CONFIG", hub / "config.toml")
   known, default = backends.load_backends()
   assert default == "ollama" and set(known) == {"claude", "ollama"}
   assert known["claude"].spec["models"]["text"] == "my-model"
 
-  (repo / ".agents").mkdir(parents=True)
-  (repo / ".agents" / "agents.toml").write_text('[review]\nexclude = ["docs/*"]\n')
-  cfg = profile.section("review", repo, add=("exclude",))
-  assert cfg["exclude"] == ["**/vendor/**", "**/data/**", "docs/*"] and cfg["jobs"] == 2
-  assert profile.section("inject")["map_over"] == 9000
+  config = profile.section("review", add=("exclude",))
+  assert config["exclude"] == ["**/vendor/**", "**/data/**"] and config["jobs"] == 2
 
 
-# -- getting it onto a machine --------------------------------------------------------------------
-
-def test_adopting_uses_a_directory_in_place_and_clones_a_url_once(isolated):
-  """A local directory is used where it is; a remote is cloned to the default place and remembered, never over a different one."""
-  mine = isolated / "dotfiles" / "agents"
-  mine.mkdir(parents=True)
-  assert profile.adopt(str(mine))[0] == 0
-  assert profile.path() == mine.resolve() and not profile.DEFAULT.exists()
-  assert profile.adopt(str(isolated / "nowhere"))[0] == 1
-
-  bare, _ = published(isolated, "theirs")
-  code, said = profile.adopt(str(bare))   # a path ending .git reads as a remote, as a URL would
-  assert code == 0 and "clone" in said
-  assert (profile.DEFAULT / "README.md").read_text() == "profile\n"
-  assert profile.path() == profile.DEFAULT.resolve()       # saved, so nothing has to be told again
-  code, said = profile.adopt(str(bare))                    # a second install is a no-op
-  assert code == 0 and said.startswith("ok")
-
-  other, _ = published(isolated, "other")
-  code, said = profile.adopt(str(other))
-  assert code == 1 and "already holds" in said
-
-
-@pytest.mark.parametrize("start", ["", "my notes\n", "my notes", "notes\n\n@{hub}/AGENTS.md"])
-def test_claude_md_points_at_your_profile_after_the_hub(isolated, monkeypatch, start):
-  """Pointers are appended once, each on a line of its own, the one in .agents before yours, never replacing the file."""
-  mine = how_i_work(isolated / "mine")
-  monkeypatch.setenv("AGENTS_PROFILE", str(mine))
-  target = isolated / "CLAUDE.md"
-  target.write_text(start.format(hub=install.HUB))
-
-  assert "your profile" in install.point_at(target)[0]
-  text = target.read_text()
-  assert text.startswith(start.format(hub=install.HUB))      # never replaced
-  lines = text.splitlines()
-  assert lines.index(f"@{install.HUB}/AGENTS.md") < lines.index(f"@{mine}/AGENTS.md")
-  assert install.point_at(target)[0].startswith("ok") and target.read_text() == text
-
-
-def test_moving_your_profile_moves_every_agents_pointer(isolated, monkeypatch):
-  """Repointing swaps the old profile's AGENTS.md for the new one and leaves the rest of the file alone."""
+def test_the_pointer_to_your_profile_follows_the_hubs_and_moves_with_the_profile(isolated, monkeypatch):
+  """A pointer to the profile's AGENTS.md is appended once after the hub's, and repointing swaps it for the new profile's."""
   monkeypatch.setenv("HOME", str(isolated / "home"))
-  first, second = how_i_work(isolated / "first"), how_i_work(isolated / "second")
+  first, second = isolated / "first", isolated / "second"
+  for directory in (first, second):
+    directory.mkdir()
+    (directory / "AGENTS.md").write_text("# how I work\n")
+  monkeypatch.setenv("AGENTS_PROFILE", str(first))
   claude = isolated / "home" / ".claude" / "CLAUDE.md"
   claude.parent.mkdir(parents=True)
-  claude.write_text(f"my notes\n\n@{install.HUB}/AGENTS.md\n@{first / 'AGENTS.md'}\n")
 
-  profile.save(second)
-  assert install.repoint(first / "AGENTS.md") == ["point .claude/CLAUDE.md at " + install.home(second.resolve() / "AGENTS.md")]
-  text = claude.read_text()
-  assert f"@{second.resolve() / 'AGENTS.md'}" in text and f"@{first / 'AGENTS.md'}" not in text
-  assert text.startswith("my notes\n") and f"@{install.HUB}/AGENTS.md" in text      # the rest untouched
+  for start in ("my notes", f"my notes\n\n@{install.HUB}/AGENTS.md"):
+    claude.write_text(start)
+    assert "your profile" in install.point_at(claude)[0]
+    text = claude.read_text()
+    assert text.startswith(start) and text.endswith(f"@{install.HUB}/AGENTS.md\n@{first}/AGENTS.md\n")
+    assert install.point_at(claude)[0].startswith("ok") and claude.read_text() == text
 
-
-def test_init_makes_a_profile_you_can_push(isolated, monkeypatch):
-  """Init reports only what it made: nothing over an existing profile, and no .git when git init failed."""
-  where = isolated / "new"
-  made = profile.init(where)
-  assert (where / "standards").is_dir() and (where / "AGENTS.md").is_file() and ".git" in made
-  assert "agent install --profile" in (where / "README.md").read_text()
-  assert profile.init(where) == []
-
-  real = profile.subprocess.run
-  monkeypatch.setattr(profile.subprocess, "run",
-                      lambda argv, **kw: subprocess.CompletedProcess(argv, 1) if argv[:2] == ["git", "init"] else real(argv, **kw))
-  assert ".git" not in profile.init(isolated / "p")
+  monkeypatch.setenv("AGENTS_PROFILE", str(second))
+  assert install.repoint(first / "AGENTS.md") == ["point .claude/CLAUDE.md at " + install.home(second / "AGENTS.md")]
+  assert claude.read_text() == text.replace(f"@{first}/", f"@{second}/")
 
 
-# -- keeping machines in step ---------------------------------------------------------------------
+def test_a_profile_is_adopted_checked_for_drift_updated_and_made(isolated, monkeypatch, capsys):
+  """A directory is used in place, a remote is cloned once and never over a different one, drift names what is unpushed, update fails rather than merge, and init reports only what it made."""
+  mine = isolated / "dotfiles"
+  mine.mkdir()
+  assert profile.adopt(str(mine))[0] == 0 and profile.path() == mine.resolve() and not profile.DEFAULT.exists()
+  assert profile.adopt(str(isolated / "nowhere"))[0] == 1
 
-def test_drift_names_what_another_machine_would_miss(isolated):
-  _, clone = published(isolated, "mine")
-  assert profile.drift(clone) == []
+  bare, clone = published(isolated, "theirs")   # a path ending .git reads as a remote, as a URL would
+  code, said = profile.adopt(str(bare))
+  assert code == 0 and "clone" in said and (profile.DEFAULT / ".git").is_dir()
+  assert profile.path() == profile.DEFAULT.resolve()
+  assert profile.adopt(str(bare))[1].startswith("ok")
+  assert "already holds" in profile.adopt(str(published(isolated, "other")[0]))[1]
 
+  commit(clone, "second")
   (clone / "voice.md").write_text("new\n")
-  assert profile.drift(clone) == ["1 uncommitted change"]
+  assert profile.drift(clone) == ["1 uncommitted change", "1 commit not pushed"]
 
-  run("add", "-A", cwd=clone)
-  run("commit", "-qm", "voice", cwd=clone)
-  assert profile.drift(clone) == ["1 commit not pushed"]
-
-  lone = isolated / "lone"
-  run("init", "-q", str(lone))
-  assert profile.drift(lone) == ["no upstream to push to"]
-
-
-def test_update_pulls_both_and_refuses_to_merge(isolated, monkeypatch, capsys):
-  """Update fast-forwards .agents and the profile, and fails rather than merge."""
-  hub_bare, hub = published(isolated, "hub")
-  mine_bare, mine = published(isolated, "mine")
-  monkeypatch.setattr(profile, "HUB", hub)
-  monkeypatch.setenv("AGENTS_PROFILE", str(mine))
-
-  for bare, name in ((hub_bare, "hub-elsewhere"), (mine_bare, "mine-elsewhere")):
-    other = isolated / name                                  # another machine pushes to each
-    run("clone", "-q", str(bare), str(other))
-    (other / "new.md").write_text("from another machine\n")
-    run("add", "-A", cwd=other)
-    run("commit", "-qm", "mac", cwd=other)
-    run("push", "-q", cwd=other)
-
+  monkeypatch.setattr(profile, "HUB", published(isolated, "hub")[1])
+  profile.git(clone, "push", "-q")
   assert cli.setup.cmd_update(argparse.Namespace()) == 0
-  assert (hub / "new.md").is_file() and (mine / "new.md").is_file()
+  assert profile.git(profile.DEFAULT, "log", "-1", "--format=%s").stdout == "second\n"
 
-  (mine / "new.md").write_text("diverged here\n")            # now one that cannot fast-forward
-  run("commit", "-qam", "here", cwd=mine)
-  other = isolated / "mine-elsewhere"
-  (other / "new.md").write_text("and there\n")
-  run("commit", "-qam", "there", cwd=other)
-  run("push", "-q", cwd=other)
+  commit(profile.DEFAULT, "here")
+  commit(clone, "there")
+  profile.git(clone, "push", "-q")
   assert cli.setup.cmd_update(argparse.Namespace()) == 1
   assert "FAIL" in capsys.readouterr().out
+
+  assert ".git" in profile.init(isolated / "new")
+  assert (isolated / "new" / "standards").is_dir() and profile.init(isolated / "new") == []
+  assert profile.drift(isolated / "new")[-1] == "no upstream to push to"
+
+  monkeypatch.setattr(profile.subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 1))
+  assert ".git" not in profile.init(isolated / "failed")

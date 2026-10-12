@@ -48,11 +48,14 @@ def formatter(command: str, settings: dict, root: Path | None = None) -> str | N
     words = segment
     while words:
       if found := next((name for name in settings["formatters"] if covers(name, words, segment)), None): return found
-      if found := next((" ".join(words[:size + 1]) for entry in settings["scripts"] if (size := covers(entry, words, segment)) and words[size:size + 1] and words[size] in settings["targets"]), None): return found
-      if words[0].rsplit("/", 1)[-1] == "pre-commit" and words[1:2] in ([], ["run"]) and (found := precommit_formatter(settings, root)): return f"pre-commit, whose config runs {found}"
+      if found := next((" ".join(words[:size + 1]) for entry in settings["scripts"] if (size := covers(entry, words, segment)) and words[size:size + 1] and words[size] in settings["targets"]), None):
+        return found
+      if words[0].rsplit("/", 1)[-1] == "pre-commit" and words[1:2] in ([], ["run"]) and (found := precommit_formatter(settings, root)):
+        return f"pre-commit, whose config runs {found}"
 
       # step past what stands in front of the command: an assignment, or a runner and its flags
       if "=" in words[0] and not words[0].startswith("-"): words = words[1:]
-      elif size := next((size for entry in settings["runners"] if (size := covers(entry, words, segment))), 0): words = list(dropwhile(lambda token: token.startswith("-"), words[size:]))
+      elif size := next((size for entry in settings["runners"] if (size := covers(entry, words, segment))), 0):
+        words = list(dropwhile(lambda token: token.startswith("-"), words[size:]))
       else: break
   return None

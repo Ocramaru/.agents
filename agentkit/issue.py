@@ -25,7 +25,7 @@ def gh(*args: str) -> subprocess.CompletedProcess:
 
 def slug(hub: Path = HUB) -> str | None:
   """owner/name for the hub's remote, from git rather than written down anywhere."""
-  match = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", git(hub, "remote", "get-url", "origin").stdout.strip())
+  match = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$", git(hub, "remote", "get-url", "origin").stdout.strip())
   return match.group(1) if match else None      # a failed call prints nothing, so it cannot match
 
 

@@ -63,7 +63,7 @@ def table(headers: list[str], rows: list[list[str]], title: str = "", note: str 
           wide: tuple[str, ...] = (), group: bool = False) -> int:
   """Draw a table and return 0; `wide` columns wrap, and `group` names the first column once per run of equal values.
 
-  Piped, the first column repeats on every row, since a script greps lines.
+  Piped, the first column repeats on every row, since a script greps lines. Cells are our markup: a caller escapes text that is not its own.
   """
   try:
     if not sys.stdout.isatty(): raise ImportError

@@ -120,18 +120,24 @@ def _insert(connection, record: dict) -> None:
                         closure["author"], closure["at"], closure["verdict"], closure["reason"]])
     return
 
-  connection.execute(   # named columns, so adding one does not shift the values
-    """insert into reviews (id, task, "at", author, agent, backend, tier, root, file, state, kind, body,
-                            max_turns, handles, messages, run, digest) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-    [record["id"], record["task"], record["at"], record["author"], record["agent"], record["backend"], record["tier"],
-     record["root"], record["file"], record["state"], record["kind"], record["body"], record["max_turns"],
-     json.dumps(record["handles"]), json.dumps(record["messages"]), record.get("run"), record.get("digest")])
+  connection.begin()   # the review and its findings land together or not at all
+  try:
+    connection.execute(   # named columns, so adding one does not shift the values
+      """insert into reviews (id, task, "at", author, agent, backend, tier, root, file, state, kind, body,
+                              max_turns, handles, messages, run, digest) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+      [record["id"], record["task"], record["at"], record["author"], record["agent"], record["backend"], record["tier"],
+       record["root"], record["file"], record["state"], record["kind"], record["body"], record["max_turns"],
+       json.dumps(record["handles"]), json.dumps(record["messages"]), record.get("run"), record.get("digest")])
 
-  if record["findings"]:
-    connection.executemany("insert into findings values (?,?,?,?,?,?,?,?,?,?,?)",
-                           [[str(uuid7()), record["id"], record["task"], record["author"], finding.get("file", record["file"]),
-                             str(finding.get("line", "")), finding.get("issue", ""), finding.get("failure", ""), finding.get("fix", ""),
-                             record["at"], None] for finding in record["findings"]])
+    if record["findings"]:
+      connection.executemany("insert into findings values (?,?,?,?,?,?,?,?,?,?,?)",
+                             [[str(uuid7()), record["id"], record["task"], record["author"], finding.get("file", record["file"]),
+                               str(finding.get("line", "")), finding.get("issue", ""), finding.get("failure", ""), finding.get("fix", ""),
+                               record["at"], None] for finding in record["findings"]])
+    connection.commit()
+  except Exception:
+    connection.rollback()
+    raise
 
 
 @contextmanager
@@ -147,7 +153,9 @@ def writer(root: Path):
     connection = None
     try:
       connection = connect(root, tries=12)
-      for record in pending: _insert(connection, record)
+      for record in pending:
+        try: _insert(connection, record)
+        except Exception as error: failures.append(error)  # noqa: BLE001 -- one record failing must not lose the rest of the queue
     except Exception as error:  # noqa: BLE001 -- collected, raised once the queue drains
       failures.append(error)   # collect rather than raise: dying here loses the rest of the queue
     finally:
@@ -350,8 +358,9 @@ def close(root: Path, file: str, line: int, verdict: str, reason: str = "") -> l
   A closure is appended, never updated, so two machines closing the same finding both survive a sync."""
   if verdict not in VERDICTS: raise ValueError(f"verdict must be one of {', '.join(VERDICTS)}")
 
-  by_id = re.fullmatch(r"[0-9a-f]{6}", file)   # an edit moves the line a review recorded; the id stays
-  hits = [finding for finding in open_findings(root) if (short_id(finding["id"]) == file if by_id else
+  found = open_findings(root)
+  by_id = re.fullmatch(r"[0-9a-f]{6}", file) and not any(finding["file"] == file for finding in found)   # an edit moves the line a review recorded; the id stays, unless a file is named like one
+  hits = [finding for finding in found if (short_id(finding["id"]) == file if by_id else
           finding["file"] == file and (not line or first_line(finding["line"]) == line))]
 
   who, now = author(), time.time()

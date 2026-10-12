@@ -6,6 +6,12 @@ kind: learned
 
 # Traps
 
+- **Per-test coverage cannot choose which tests to cut.** `pytest --cov` does not trace the tests that run `agent(...)` as a subprocess, so they look like they reach nothing, and Python 3.14's default core cannot record `--cov-context`; set `COVERAGE_CORE=ctrace`. A test is worth keeping if a mutation of the source fails it: apply the edit, run the test, revert.
+
+- **A test of a hook that sources `$HOME/.agents` runs the installed hub, not the checkout.** Mutating `hooks/gate.sh` in a worktree changed nothing until the test gave the hook a throwaway HOME whose `.agents` points at the checkout (`test_gate.Hook`). Check that a mutated copy of the code under test fails the test.
+
+- **The argparse fold test passes vacuously on a newer Python.** Only system 3.12.3 strands `nargs="*"` after a flag; 3.12.12, 3.13 and 3.14 do not, so the test bites only under `UV_PYTHON=/usr/bin/python3.12`.
+
 - **A conflicted merge in `~/.agents` breaks every agent's hooks until it is resolved.** A cherry-pick left conflict markers in `cli/sub.py`, and the guard failed to import in two sessions at once; it failed open, so nothing was blocked. Merge and cherry-pick in a worktree, then fast-forward.
 
 - **`uv run agent` in a worktree runs the installed hub, not the worktree.** The project declares no `agent` script, so uv falls through to `~/.local/bin/agent`, and a change looked like it did nothing. Try a worktree's CLI with `uv run python -m agentkit`.

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from agentkit import inject, manifest, notes, tree
 from agentkit.command import arg, command
-from agentkit.cli.out import done, dump, fail, line, table
+from agentkit.cli.out import done, dump, escape, fail, line, table
 
 
 @command("init", help="create a .agents here")
@@ -43,7 +43,7 @@ def cmd_inject(args) -> int:
   if args.edit:
     # a payload that is not what Claude Code sends must not cost the edit its standards
     try: payload = json.loads(sys.stdin.read() or "{}")
-    except json.JSONDecodeError: payload = {}
+    except ValueError: payload = {}   # bad JSON, or bytes that are not text
     tool = (payload.get("tool_input") if isinstance(payload, dict) else None) or {}
     warn = notes.abandoned(path, tool.get("old_string") or "", tool.get("new_string") or "")
 
@@ -60,7 +60,7 @@ def cmd_standards(args) -> int:
   path = Path(args.file)
   layers = inject.library_for(path).for_file(notes.match_name(path))
   if not layers: return fail(f"no standard governs {path.name}")
-  return table(["standard", "from", "what"], [[layer.doc.name, layer.origin, layer.doc.get("description") or ""] for layer in layers], wide=("what",))
+  return table(["standard", "from", "what"], [[escape(layer.doc.name), escape(layer.origin), escape(layer.doc.get("description") or "")] for layer in layers], wide=("what",))
 
 
 @command("remap", help="refresh the section table at the top of each note")
@@ -89,4 +89,4 @@ def cmd_split(args) -> int:
 @command("manifest", help="machine-readable description of the hub, for indexers")
 @arg("--notes", nargs="?", const=".", metavar="ROOT", help="instead list .agents note directories under ROOT (default: here)")
 def cmd_manifest(args) -> int:
-  return dump(manifest.notes(args.notes) if args.notes else manifest.hub())
+  return dump(manifest.notes(args.notes) if args.notes is not None else manifest.hub())

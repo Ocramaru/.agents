@@ -214,7 +214,8 @@ def init(target: Path) -> dict:
   for template in sorted((_profile.TEMPLATES / "agents").iterdir()):
     file, text = agents_dir / template.name, template.read_text(encoding="utf-8").replace("{name}", target.name)
     if not file.exists(): file.write_text(text, encoding="utf-8")
-    elif template.name == ".gitignore" and (lacking := [line for line in text.splitlines() if line not in (have := file.read_text(encoding="utf-8").splitlines())]): file.write_text("\n".join(have + lacking) + "\n", encoding="utf-8")   # an existing file stays as written; an ignore list gains the lines it lacks
+    elif template.name == ".gitignore" and (lacking := [line for line in text.splitlines() if line not in (have := file.read_text(encoding="utf-8").splitlines())]):
+      file.write_text("\n".join(have + lacking) + "\n", encoding="utf-8")   # an existing file stays as written; an ignore list gains the lines it lacks
     else: continue
     added.append(template.name)
   return {"path": str(agents_dir), "made": made, "added": added, "inherits": [label(ancestor) for ancestor in chain(target) if ancestor != agents_dir]}

@@ -19,12 +19,12 @@ from agentkit.session import Message, Session
 from agentkit.standards import Library
 
 
-def skipped(path: Path, root: Path) -> bool:
-  """Whether `path` sits under a directory no review reads, judged from `root` down.
+def skipped(path: Path, root: Path) -> list[str]:
+  """The directories no review reads that `path` sits under, judged from `root` down; empty when a review reads it.
   Judged on the absolute path, every file of a repo living under a directory called `build` or `vendor` is skipped."""
   try: parts = Path(path).resolve().relative_to(Path(root).resolve()).parts
   except ValueError: parts = Path(path).parts
-  return any(tree.ignored(directory) for directory in parts[:-1])
+  return [directory for directory in parts[:-1] if tree.ignored(directory)]
 
 
 def _matches(name: str, globs: list[str]) -> bool:
@@ -62,6 +62,8 @@ def new_run() -> str:
   """An invocation's id, readable and sortable.
   A uuid7's leading digits change about once a minute, so they do not tell two runs apart."""
   return f"{time.strftime('%m%d-%H%M')}-{uuid.uuid4().hex[:4]}"
+
+
 AUTO = "auto"   # the agent name that means "whichever agents govern the file"
 
 
@@ -197,17 +199,16 @@ def run(agent: str, backend: Backend, paths: list[Path], root: Path, definition,
   jobs = max(1, min(jobs, backend.parallel))   # never more than the backend declares it takes
   results = []
   with reviews.writer(root) as put, ThreadPoolExecutor(max_workers=jobs) as pool:
-    asked = {pool.submit(file, agent, backend, path, definition, tier, root, closed.get(label(path, root)), on_start, run,
-                         effort=effort, previous=known.get(task_id(agent, root, label(path, root))), libraries=libraries): path
+    asked = {pool.submit(file, agent, backend, path, definition, tier, root, closed.get(relative := label(path, root)), on_start, run,
+                         effort=effort, previous=known.get(task_id(agent, root, relative)), libraries=libraries): path
              for path in paths}
 
     for future in as_completed(asked):
-      try:
-        result, record = future.result()
-        if record: put(record)   # a verdict that still stands is already in the ledger
+      try: result, record = future.result()
       except Exception as error:  # noqa: BLE001 -- one file failing is that file's result
-        result = {"file": label(asked[future], root), "agent": agent, "state": "failed", "kind": "note",
-                  "body": f"{type(error).__name__}: {error}", "findings": []}   # named, so the report says which file failed
+        result, record = {"file": label(asked[future], root), "agent": agent, "state": "failed", "kind": "note",
+                          "body": f"{type(error).__name__}: {error}", "findings": []}, None   # named, so the report says which file failed
       results.append(result)
       if on_done: on_done(result)
+      if record: put(record)   # after the result is reported, so a ledger failure does not replace it; a verdict that still stands is already in the ledger
   return results
