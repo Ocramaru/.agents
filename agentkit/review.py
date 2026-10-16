@@ -35,8 +35,8 @@ def _matches(name: str, globs: list[str]) -> bool:
 def discover(root: Path, exclude: list[str], max_bytes: int) -> list[Path]:
   """The files under `root` that a review may read: not in a skipped directory, not excluded, not over `max_bytes`. `exclude` matches the relative path.
   Names are filtered before any file is stat'ed, since the stat is the costly part."""
-  # git's tracked files honour .gitignore; -z, since git otherwise quotes a non-ASCII name that exists on no disk
-  listed = _profile.git(root, "ls-files", "-z")
+  # tracked and not-yet-added files, both honouring .gitignore; -z, since git otherwise quotes a non-ASCII name that exists on no disk
+  listed = _profile.git(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
   if listed.returncode == 0: relatives = [name for name in listed.stdout.split("\0") if name]
   else:   # no git: a walk that never enters a skipped directory
     relatives = []

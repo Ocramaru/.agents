@@ -122,15 +122,16 @@ def test_a_review_reads_the_files_git_lists_filtered_by_path_and_by_what_the_sta
   """`exclude` matches the relative path, a spaced path stays whole, a named file is an explicit ask, and nothing under a skipped directory is reviewed."""
   monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
   root = git(tmp_path / "build" / "repo")
-  put(root, "café.py", "keep.py", "my notes.py", "sub/keep.py", "sub/migrations/0001.py", "dist/gen.py", "pkg/__pycache__/stray.py", "untracked.py")
+  put(root, "café.py", "keep.py", "my notes.py", "sub/keep.py", "sub/migrations/0001.py", "dist/gen.py", "pkg/__pycache__/stray.py", "untracked.py", "ignored.py")
   put(root, "big.py", text="x" * 300_000)
-  subprocess.run(["git", "add", "-f", "-A", ":!untracked.py"], cwd=root, check=True)
+  (root / ".git" / "info" / "exclude").write_text("ignored.py\n")
+  subprocess.run(["git", "add", "-f", "-A", ":!untracked.py", ":!ignored.py"], cwd=root, check=True)
   subprocess.run(["git", "-c", "user.name=T", "-c", "user.email=t@t.io", "commit", "-qm", "c"], cwd=root, check=True)
 
   found = lambda exclude=(), max_bytes=200_000: [path.relative_to(root).as_posix() for path in review.discover(root, list(exclude), max_bytes)]
-  assert found() == ["café.py", "keep.py", "my notes.py", "sub/keep.py", "sub/migrations/0001.py"]   # not dist, __pycache__, untracked, big
-  assert found(["keep.py"]) == ["café.py", "my notes.py", "sub/keep.py", "sub/migrations/0001.py"]
-  assert found(["sub/*"]) == ["café.py", "keep.py", "my notes.py"]   # fnmatch's * crosses /
+  assert found() == ["café.py", "keep.py", "my notes.py", "sub/keep.py", "sub/migrations/0001.py", "untracked.py"]   # a file not yet added counts; not dist, __pycache__, ignored, big
+  assert found(["keep.py"]) == ["café.py", "my notes.py", "sub/keep.py", "sub/migrations/0001.py", "untracked.py"]
+  assert found(["sub/*"]) == ["café.py", "keep.py", "my notes.py", "untracked.py"]   # fnmatch's * crosses /
   assert found(max_bytes=1) == []
 
   monkeypatch.chdir(root)

@@ -6,6 +6,8 @@ kind: learned
 
 # Traps
 
+- **`git ls-files` lists only tracked files.** `agent sub review` on a directory of new, not-yet-added files found nothing while an explicit `.py` path routed, in a repo whose package had never been committed. Discovery lists `--cached --others --exclude-standard`: new files count, `.gitignore` still holds.
+
 - **Per-test coverage cannot choose which tests to cut.** `pytest --cov` does not trace the tests that run `agent(...)` as a subprocess, so they look like they reach nothing, and Python 3.14's default core cannot record `--cov-context`; set `COVERAGE_CORE=ctrace`. A test is worth keeping if a mutation of the source fails it: apply the edit, run the test, revert.
 
 - **A test of a hook that sources `$HOME/.agents` runs the installed hub, not the checkout.** Mutating `hooks/gate.sh` in a worktree changed nothing until the test gave the hook a throwaway HOME whose `.agents` points at the checkout (`test_gate.Hook`). Check that a mutated copy of the code under test fails the test.
