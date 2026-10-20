@@ -89,8 +89,8 @@ def checks() -> list[tuple[bool, str, str]]:
 
   out.append((bool(shutil.which("jq")), "jq on PATH, which every hook parses its payload with", "install jq (on a Mac: brew install jq); without it no hook does anything"))
   out.append((bool(shutil.which("uv")), "uv on PATH, so the hub manages its own venv", "install uv; without it `agent sub review` cannot reach duckdb"))
-  # `agent issue` is the only channel from another repo back to the hub, so it is checked before it is needed
-  out.append((bool(shutil.which("gh") and issue.gh("auth", "status").returncode == 0), "gh authenticated, so `agent issue` can reach the hub", "install gh and run `gh auth login`; without it friction with the hub has nowhere to go"))
+  # `agent issue` drafts without gh; gh is how it finds an issue already filed, and how `--list` reads them
+  out.append((bool(shutil.which("gh") and issue.gh("auth", "status").returncode == 0), "gh authenticated, so `agent issue` can find an issue already filed", "install gh and run `gh auth login`; without it `agent issue` cannot see what is already filed, and `agent issue --list` cannot read it"))
 
   errors = hooks.errors()   # a crashing hook only shows in the log
   out.append((not errors, "no hook errors since .agents last changed", f"{len(errors)} logged, the latest from {errors[-1][1]}: {errors[-1][4][:120]}; `agent hooks` lists them" if errors else ""))

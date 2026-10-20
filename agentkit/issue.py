@@ -1,6 +1,6 @@
-"""Friction with the hub, filed as an issue on it from any repo, since another repo's notes are never read here.
-A report carries the .agents commit and platform; the repo and hostname only with `--context`, as issues are public.
-A title already open gets a comment rather than a second issue.
+"""Friction with the hub, drafted as an issue on it from any repo, since another repo's notes are never read here.
+A draft carries the .agents commit and platform; the repo and hostname only with `--context`, as issues are public.
+Nothing is filed: the draft opens as a prefilled GitHub page for the person to read, edit and submit.
 
 Author: Marco Cassar (@Ocramaru)
 """
@@ -12,10 +12,14 @@ import platform
 import re
 import socket
 import subprocess
+import urllib.parse
+import webbrowser
 from pathlib import Path
 
 from agentkit import tree, version
 from agentkit.profile import INSTALLED, SHIPPED, git
+
+LINK_LIMIT = 8000   # characters a browser will take in a link
 
 
 def gh(*args: str) -> subprocess.CompletedProcess:
@@ -45,7 +49,7 @@ def named(address: str) -> str | None:
 
 def open_issues(repository: str) -> list[dict] | None:
   """The open issues, or None when they could not be read.
-  None is not an empty list: read as one, dedupe files a duplicate whenever gh is down."""
+  None is not an empty list: read as one, a duplicate check passes whenever gh is down."""
   result = gh("issue", "list", "--repo", repository, "--state", "open", "--limit", "1000",
               "--json", "number,title,url,comments")
   if result.returncode: return None
@@ -55,7 +59,7 @@ def open_issues(repository: str) -> list[dict] | None:
 
 def filed(repository: str) -> list[str]:
   """What is already filed, so a session reads the answer instead of filing the question again.
-  Dedupe stops a second copy but does not show that the first has a reply waiting."""
+  Dedupe points at the first copy but does not show that it has a reply waiting."""
   found = open_issues(repository)
   if found is None: return ["could not read the issues: is gh installed and logged in? (gh auth status)"]
 
@@ -69,9 +73,9 @@ def filed(repository: str) -> list[str]:
   return out
 
 
-def file(title: str, body: str, working_directory: Path, repository: str, dry: bool = False,
-           context: bool = False) -> tuple[int, str]:
-  """File it, or add to the open issue that already says it. Returns (exit code, what happened)."""
+def draft(title: str, body: str, working_directory: Path, repository: str, dry: bool = False,
+          context: bool = False) -> str:
+  """Open a prefilled new-issue page, or the open issue that already says it, and return what to show the person. Nothing is filed."""
   foot = f"agentkit {version()} · {platform.system()}"
 
   if context:   # issues on .agents are public, and a hostname or a private repo's name is not theirs
@@ -80,19 +84,21 @@ def file(title: str, body: str, working_directory: Path, repository: str, dry: b
   full = f"{body.strip()}\n\n---\n{foot}" if body.strip() else foot
 
   found = open_issues(repository)
-  if found is None: return 1, "could not read the open issues, so not filing blind: gh auth status"
+  notes = ["The duplicate check was skipped: gh could not read the open issues (is it installed and logged in?)."] if found is None else []
 
   # the same title ignoring case and punctuation; a title with nothing left to compare matches nothing
   normalise = lambda text: " ".join(re.sub(r"[\W_]+", " ", text.casefold()).split())
   wanted = normalise(title)
-  existing = next((issue for issue in found if wanted and normalise(issue["title"]) == wanted), None)
-
-  if dry:
-    return 0, (f"would comment on {existing['url']}:\n\n{full}" if existing
-               else f"would open on {repository}:\n\n# {title}\n\n{full}")
+  existing = next((issue for issue in found or [] if wanted and normalise(issue["title"]) == wanted), None)
 
   if existing:
-    result = gh("issue", "comment", str(existing["number"]), "--repo", repository, "--body", full)
-    return (0, f"added to {existing['url']}") if result.returncode == 0 else (1, result.stderr.strip())
-  result = gh("issue", "create", "--repo", repository, "--title", title, "--body", full)
-  return (0, result.stdout.strip()) if result.returncode == 0 else (1, result.stderr.strip())
+    target = existing["url"]
+    shown = [f"#{existing['number']} on {repository} already says this: {existing['title']}", "Paste this under it as a comment:", "", full]
+  else:
+    lines = full.split("\n")
+    kept = len(lines)
+    while len(target := f"https://github.com/{repository}/issues/new?" + urllib.parse.urlencode({"title": title, "body": "\n".join(lines[:kept])}, quote_via=urllib.parse.quote)) > LINK_LIMIT and kept: kept -= 1
+    if kept < len(lines): notes.append(f"A browser caps the length of a link, so it carries {kept} of the {len(lines)} lines; paste the whole body above.")
+    shown = [f"Draft issue for {repository}; nothing is filed until you submit it:", "", f"# {title}", "", full]
+
+  return "\n".join([*shown, "", *notes, f"{'Dry run, nothing opened' if dry else 'Opened in your browser' if webbrowser.open(target) else 'No browser opened'}: {target}"])

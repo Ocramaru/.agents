@@ -157,4 +157,4 @@ Something about `.agents` is awkward, from inside another repo:
 agent issue "sub close wants file:line but --open prints the file alone" --body "what I was doing"
 ```
 
-It files against this repo, carrying the commit `.agents` is at and your platform. Its issues are public, so the repo you were in and your machine's name go in only with `--context`. A title already open gets a comment instead of a second issue. `--dry-run` prints it without filing, and `agent issue --list` shows what is already filed.
+It opens a prefilled issue on this repo in your browser, to read, edit and submit, carrying the commit `.agents` is at and your platform. The link is printed too, for a machine with no browser. Its issues are public, so the repo you were in and your machine's name go in only with `--context`. A title already open opens that issue instead, with the text printed to paste as a comment; without `gh` the draft is made and that check is skipped. `--dry-run` prints the draft and the link and opens nothing, and `agent issue --list` shows what is already filed.

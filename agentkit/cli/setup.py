@@ -232,11 +232,11 @@ def cmd_profile_use(args) -> int:
   return report(code, "\n".join([said, *install.repoint(was)]) if code == 0 else said)
 
 
-@command("issue", help="report friction with the hub itself, from whatever repo you met it in")
+@command("issue", help="draft a report of friction with the hub, from whatever repo you met it in, for you to submit")
 @arg("title", nargs="?", help="one line: what was awkward, wrong or missing")
 @arg("--body", default="", help="what you were doing and what you expected")
 @arg("--list", action="store_true", dest="list_", help="what is already filed, and what has a reply")
-@arg("--dry-run", action="store_true", dest="dry", help="print what would be filed and stop")
+@arg("--dry-run", action="store_true", dest="dry", help="print the draft and its link and open nothing")
 @arg("--context", action="store_true", help="also say which repo it was met in, and this machine's name")
 def cmd_issue(args) -> int:
   repo = issue.slug()
@@ -245,7 +245,7 @@ def cmd_issue(args) -> int:
   if args.list_:
     return done(*(issue.filed(repo) or ["nothing filed against the hub"]))
   if not args.title: return fail("say what was awkward, or pass --list to read what already is", 2)
-  return report(*issue.file(args.title, args.body, Path.cwd(), repo, dry=args.dry, context=args.context))
+  return done(issue.draft(args.title, args.body, Path.cwd(), repo, dry=args.dry, context=args.context))
 
 
 @command("status", help="what this machine has: the install, profile, backend, standards, notes, findings and hooks")

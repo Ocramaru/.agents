@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 dependencies = ["duckdb>=1.0", "rich>=13"]
 
 [project.urls]
-Repository = "https://github.com/Ocramaru/.agents"   # where `agent issue` files from an install, which has no git remote
+Repository = "https://github.com/Ocramaru/.agents"   # where `agent issue` drafts from an install, which has no git remote
 
 [project.scripts]
 agent = "agentkit.__main__:main"
