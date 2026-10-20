@@ -11,7 +11,7 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-from agentkit import hub, notes, profile as _profile
+from agentkit import config, hub, notes
 from agentkit.frontmatter import load
 
 LINKS = "agents.toml"
@@ -100,7 +100,7 @@ def payload(path: Path, skip: set[Path] | None = None) -> tuple[str, list[str], 
 
   Context notes fill the budget first, nearest to outermost, before anything opted into with `inject = "full"`.
   """
-  settings, skip = _profile.section("inject"), skip or set()
+  settings, skip = config.section("inject"), skip or set()
   links = chain(path)
   if not links: return "", [], []
 

@@ -5,12 +5,12 @@ Author: Marco Cassar (@Ocramaru)
 
 import pytest
 
-from agentkit import hub, profile
+from agentkit import config, hub, profile
 from agentkit.guard import formatter
 from conftest import git
 
 # the bundled runners over a list of our own, so the cases hold whichever formatters ship, on or off
-SETTINGS = {**profile.section("guard"), "enabled": True, "formatters": ["black", "prettier", "ruff format", "ruff check --unsafe-fixes"], "targets": ["fmt", "format"]}
+SETTINGS = {**config.section("guard"), "enabled": True, "formatters": ["black", "prettier", "ruff format", "ruff check --unsafe-fixes"], "targets": ["fmt", "format"]}
 
 
 @pytest.mark.parametrize("command,blocked", [
@@ -52,7 +52,7 @@ def test_pre_commit_is_judged_by_what_its_config_runs(tmp_path):
 
 def test_the_bundled_list_lets_gofmt_run():
   """Go's own formatter is its layout, so the go standard's `gofmt -w` is never refused."""
-  assert formatter("gofmt -w main.go", {**profile.section("guard"), "enabled": True}) is None and formatter("go fmt ./...", {**profile.section("guard"), "enabled": True}) is None
+  assert formatter("gofmt -w main.go", {**config.section("guard"), "enabled": True}) is None and formatter("go fmt ./...", {**config.section("guard"), "enabled": True}) is None
 
 
 def test_local_toml_and_then_a_repo_turn_it_off(tmp_path, monkeypatch):
@@ -62,8 +62,8 @@ def test_local_toml_and_then_a_repo_turn_it_off(tmp_path, monkeypatch):
   monkeypatch.delenv("AGENTS_PROFILE")
   (tmp_path / "local.toml").write_text('[guard]\nenabled = true\nformatters = ["mine"]\n')
   repo = git(tmp_path / "fork")
-  assert formatter("mine .", profile.section("guard", repo), repo) == "mine"
+  assert formatter("mine .", config.section("guard", repo), repo) == "mine"
 
   (repo / ".agents").mkdir()
   (repo / ".agents" / "agents.toml").write_text('[guard]\nenabled = false\n')
-  assert formatter("mine .", settings := profile.section("guard", repo), repo) is None and settings["formatters"] == ["mine"]
+  assert formatter("mine .", settings := config.section("guard", repo), repo) is None and settings["formatters"] == ["mine"]

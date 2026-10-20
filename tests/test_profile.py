@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from conftest import agent
 
-from agentkit import agents, backends, cli, doctor, git, hub, install, profile
+from agentkit import agents, backends, cli, config, doctor, git, hub, install, profile
 from agentkit.standards import Library
 
 
@@ -98,8 +98,8 @@ def test_a_profile_replaces_the_hubs_standards_reviewers_and_backends_by_name_an
   assert default == "ollama" and set(known) == {"claude", "ollama"}
   assert known["claude"].spec["models"]["text"] == "my-model"
 
-  config = profile.section("review", add=("exclude",))
-  assert config["exclude"] == ["**/vendor/**", "**/data/**"] and config["jobs"] == 2   # a lone string accumulates as a list of one
+  settings = config.section("review", add=("exclude",))
+  assert settings["exclude"] == ["**/vendor/**", "**/data/**"] and settings["jobs"] == 2   # a lone string accumulates as a list of one
 
 
 def test_the_pointer_to_your_profile_follows_the_hubs_and_moves_with_the_profile(isolated, monkeypatch):
@@ -201,7 +201,7 @@ def test_doctor_fails_a_public_profile_remote_and_profile_names_a_missing_one(is
 
 def test_a_key_is_written_into_its_table_even_when_the_header_ends_the_file(tmp_path):
   """A [table] header on the last line with no newline is found and filled, never added a second time, which TOML refuses."""
-  config = tmp_path / "config.toml"
-  config.write_text("[review]\njobs = 2\n\n[backends]")
-  profile.write(config, "backends", "default", "claude")
-  assert tomllib.loads(config.read_text()) == {"review": {"jobs": 2}, "backends": {"default": "claude"}}
+  config_file = tmp_path / "config.toml"
+  config_file.write_text("[review]\njobs = 2\n\n[backends]")
+  config.write(config_file, "backends", "default", "claude")
+  assert tomllib.loads(config_file.read_text()) == {"review": {"jobs": 2}, "backends": {"default": "claude"}}

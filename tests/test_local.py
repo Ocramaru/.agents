@@ -8,7 +8,7 @@ from pathlib import Path
 
 from conftest import git, note, standard
 
-from agentkit import hub, inject, notes, profile, tree
+from agentkit import config, hub, inject, notes, tree
 
 
 def local(repo: Path, text: str, name: str = "context") -> Path:
@@ -68,8 +68,8 @@ def test_a_local_agents_toml_is_the_last_config_layer(repo):
   (repo / ".agents" / "agents.toml").write_text('[review]\nexclude = ["docs/*"]\njobs = 2\n')
   local(repo, "x")
   (repo / ".agents" / ".local" / "agents.toml").write_text('[review]\nexclude = ["scratch/*"]\njobs = 1\n[guard]\nenabled = false\n')
-  config = profile.section("review", repo, add=("exclude",))
-  assert config["exclude"][-2:] == ["docs/*", "scratch/*"] and config["jobs"] == 1 and profile.section("guard", repo)["enabled"] is False
+  settings = config.section("review", repo, add=("exclude",))
+  assert settings["exclude"][-2:] == ["docs/*", "scratch/*"] and settings["jobs"] == 1 and config.section("guard", repo)["enabled"] is False
 
 
 def test_init_ignores_the_local_notes_and_the_review_ledger_and_tops_up_an_old_ignore(tmp_path):

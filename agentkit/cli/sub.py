@@ -13,7 +13,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from agentkit import agents, backends, git, hooks, profile, review, reviews, tree
+from agentkit import agents, backends, config, git, hooks, review, reviews, tree
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli import show
 from agentkit.cli.setup import settle
@@ -147,14 +147,14 @@ def cmd_review(args) -> int:
     root = roots[0] if roots else (files[0].parent if files else Path.cwd())
     root = tree.git_root(root) or root
 
-  config = profile.section("review", root, add=("exclude",))   # excludes accumulate from every layer; anything else, the nearest wins
-  exclude = [] if args.no_config_excludes else list(config["exclude"])
+  settings = config.section("review", root, add=("exclude",))   # excludes accumulate from every layer; anything else, the nearest wins
+  exclude = [] if args.no_config_excludes else list(settings["exclude"])
   exclude += args.exclude or []
-  jobs = args.jobs or config["jobs"]
-  limit = args.limit if args.limit is not None else config["limit"]
+  jobs = args.jobs or settings["jobs"]
+  limit = args.limit if args.limit is not None else settings["limit"]
 
   # `auto` reads the config, a kind is every agent of that kind, any other name that agent
-  names = [] if args.recheck else list(config.get("agents") or []) if args.agent == review.AUTO else kinds.get(args.agent) or [args.agent]
+  names = [] if args.recheck else list(settings.get("agents") or []) if args.agent == review.AUTO else kinds.get(args.agent) or [args.agent]
   if args.variant:
     try: names = [review.variant(args.agent, args.variant, kinds)]
     except ValueError as error:
@@ -172,7 +172,7 @@ def cmd_review(args) -> int:
     note(f"rechecking under {here} (run it from the repo root for all of it)")
     args.paths = [str(Path.cwd())]
 
-  discovered = [path for folder in roots for path in review.discover(folder, exclude, config["max_bytes"])]
+  discovered = [path for folder in roots for path in review.discover(folder, exclude, settings["max_bytes"])]
   libraries = {}
   if args.recheck:   # each reviewer with the files it has something open on, narrowed to an agent or kind and to paths
     under = [Path(path).resolve() for path in args.paths]
@@ -204,8 +204,8 @@ def cmd_review(args) -> int:
     return 0
 
   if exclude and roots: note(f"excluding {', '.join(exclude)}")  # only discovery honours them
-  if (code := settle(args.backend or config.get("backend"))): return code
-  backend = backends.get(args.backend or config.get("backend"))   # a repo may keep its reviews local
+  if (code := settle(args.backend or settings.get("backend"))): return code
+  backend = backends.get(args.backend or settings.get("backend"))   # a repo may keep its reviews local
   if (code := _missing_model(args, backend, {args.tier or agents.definition(name, found).get("model") for name, _ in plans})): return code
 
   # what actually runs at once: plans go one after another, and the backend caps each of them

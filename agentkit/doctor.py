@@ -12,7 +12,7 @@ import shutil
 import tomllib
 from pathlib import Path
 
-from agentkit import agents, backends, git, guard, hooks, hub, inject, install, issue, mapblock, notes, profile, tree
+from agentkit import agents, backends, config, git, guard, hooks, hub, inject, install, issue, mapblock, notes, profile, tree
 from agentkit.frontmatter import load
 from agentkit.standards import Library
 MODES = ("full", "context", "none")   # what agents.toml `inject` may say
@@ -79,7 +79,7 @@ def checks() -> list[tuple[bool, str, str]]:
     executable = (backend.spec.get("argv") or [""])[0]
     out.append((bool(executable and shutil.which(executable)), f"backend {name} -> {executable or '(no argv)'}", f"install {executable}, or drop it" if executable else f"give backend {name} an argv under [backends.{name}] in config.toml"))
 
-  formatter = guard.precommit_formatter(profile.section("guard", tree.git_root(here)), here)   # catches a formatter hook added to a repo later
+  formatter = guard.precommit_formatter(config.section("guard", tree.git_root(here)), here)   # catches a formatter hook added to a repo later
   out.append((not (formatter and (here / ".git" / "hooks" / "pre-commit").is_file()), "no commit hook here runs a formatter", f"pre-commit is installed and its config runs {formatter}; drop the hook or the config entry"))
 
   editor_settings = here / ".vscode" / "settings.json"
@@ -118,6 +118,6 @@ def context_size(agents_dir: Path, base: Path) -> list[tuple[bool, str, str]]:
   if not context.is_file(): return []
 
   body = load(context).body
-  sent = len(tree.brief(body, profile.section("inject")["map_over"]).encode())
+  sent = len(tree.brief(body, config.section("inject")["map_over"]).encode())
   offered = [part for part, globs in tree.parts(agents_dir, "context") if not globs]
   return [(True, f"{agents_dir.relative_to(base) if agents_dir.is_relative_to(base) else agents_dir}/context.md {f"sends {sent} bytes" if sent >= len(body.encode()) else f"sends its map, {sent} of {len(body.encode())} bytes"}{f", {len(offered)} part{'' if len(offered) == 1 else 's'} to read on demand" if offered else ""}", "")]

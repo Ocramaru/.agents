@@ -6,7 +6,7 @@ Author: Marco Cassar (@Ocramaru)
 import subprocess
 from pathlib import Path
 
-from agentkit import hub, notes, profile as _profile, tree
+from agentkit import config, hub, notes, profile as _profile, tree
 from agentkit.frontmatter import Doc, load
 from agentkit.standards import Library
 
@@ -15,7 +15,7 @@ AGENTS = hub.BUNDLED / "agents"
 
 def definitions(root: Path = AGENTS) -> dict[str, Doc]:
   """Every reviewer definition by name, the profile's replacing .agents' own, with [review]'s `model` where none is named."""
-  default = _profile.section("review", tree.git_root(Path.cwd()) or Path.cwd())["model"]
+  default = config.section("review", tree.git_root(Path.cwd()) or Path.cwd())["model"]
 
   found = {path.stem: load(path) for directory in (Path(root), _profile.file("agents") if Path(root) == AGENTS else None) if directory for path in sorted(directory.glob("*.md"))}
   for definition in found.values(): definition.meta.setdefault("model", default)

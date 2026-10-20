@@ -18,7 +18,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from agentkit import hub, profile as _profile
+from agentkit import config, hub, profile as _profile
 
 PLACEHOLDER = re.compile(r"\{(model|prompt|session|effort)\}")
 
@@ -161,7 +161,7 @@ def _dotted(node: dict, path: str | None):
 
 def load_backends() -> tuple[dict[str, Backend], str]:
   """Every backend by name, a later layer's replacing one of the same name, and the last `default` set, `""` when none is."""
-  default = (table := _profile.section("backends")).pop("default", "")   # the one plain value among the backends' tables
+  default = (table := config.section("backends")).pop("default", "")   # the one plain value among the backends' tables
   return {name: Backend(name, specification) for name, specification in table.items()}, default
 
 
@@ -182,5 +182,5 @@ def get(name: str | None = None) -> Backend:
 def choose(name: str) -> Path:
   """Make `name` the default backend: in the profile's config.toml, or this machine's local.toml when there is no profile. Returns the file written."""
   where = root / "config.toml" if (root := _profile.path()) else hub.LOCAL
-  _profile.write(where, "backends", "default", name)
+  config.write(where, "backends", "default", name)
   return where
