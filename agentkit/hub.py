@@ -16,6 +16,8 @@ INSTALLED = (PACKAGE / "bundled").is_dir()   # a wheel carries the hub's files i
 BUNDLED = PACKAGE / "bundled" if INSTALLED else PACKAGE.parent   # standards, reviewers, templates and hooks as released, replaced by an upgrade
 HOME = Path.home() / ".agents" if INSTALLED else PACKAGE.parent   # this machine's state and the hooks at their fixed paths; a clone is its own
 CONFIG = BUNDLED / "config.toml"   # the hub's own settings, and so every key's default
+STANDARDS = BUNDLED / "standards"   # the starter standards, one file each; a profile's of the same name replace them
+REVIEWERS = BUNDLED / "agents"   # the reviewer definitions, one file each, in a folder the hub calls `agents`
 TEMPLATES = BUNDLED / "templates"   # what `agent init` and `agent profile init` write, one folder each
 LOCAL = HOME / "local.toml"   # this machine's settings and where its profile is, never committed
 

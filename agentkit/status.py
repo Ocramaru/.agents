@@ -40,9 +40,9 @@ def backend() -> list[tuple[str, str]]:
 def counts() -> list[tuple[str, str]]:
   """The standards in force here by where each comes from, and the note directories from here up to the repo root."""
   here = Path.cwd()
-  origins = Counter("hub" if layer.origin == "machine-wide" else layer.origin for layers in inject.library_for(here).layers.values() for layer in layers)
+  origins = Counter(layer.origin for layers in inject.library_for(here).layers.values() for layer in layers)
   directories = [tree.label(directory) for directory in tree.chain(here) if notes.note_files(directory)]
-  return [("standards", ", ".join(f"{origins[origin]} {origin}" for origin in ("hub", "profile", "repo"))),
+  return [("standards", ", ".join(f"{origins[origin]} {origin}" for origin in ("bundled", "profile", "repo"))),
           ("notes", f"{len(directories)} on the path from here: {', '.join(directories)}" if directories else "none on the path from here")]
 
 

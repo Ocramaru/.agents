@@ -9,19 +9,19 @@ import hashlib
 import tempfile
 from pathlib import Path
 
-from agentkit import git, notes, tree
-from agentkit.standards import GLOBAL, Library, scoped
+from agentkit import git, hub, notes, tree
+from agentkit.standards import Library, scoped
 
 MENTION = "Not loaded. Read one when you have a reason to."
 
 
 def library_for(path: Path) -> Library:
-  """Machine-wide standards, layered along the chain, nearest last.
+  """The bundled standards, the profile's and those of each repo along the chain, layered, nearest last.
   A repo names its own files for a standard in `[applies]`, since one project's entry point is another's ordinary script."""
   links, extra = tree.chain(path), {}
   for agents_dir in links:
     for name, globs in flatten_applies(tree.toml(agents_dir).get("applies") or {}).items(): extra.setdefault(name, []).extend(globs)
-  return Library(GLOBAL, [agents_dir / "standards" for agents_dir in links if (agents_dir / "standards").is_dir()], extra)
+  return Library(hub.STANDARDS, [agents_dir / "standards" for agents_dir in links if (agents_dir / "standards").is_dir()], extra)
 
 
 def flatten_applies(table: dict, prefix: str = "") -> dict[str, list[str]]:

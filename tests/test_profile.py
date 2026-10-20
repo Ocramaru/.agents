@@ -84,8 +84,9 @@ def test_a_profile_replaces_the_hubs_standards_reviewers_and_backends_by_name_an
     directory.mkdir(parents=True, exist_ok=True)
     (directory / f"{name}.md").write_text(f"---\nname: {name}\ndescription: {name}\napplies: *.py\nkind: logic\n---\n\n{body}\n")
   assert [(layer.origin, layer.doc.body.strip()) for layer in Library(bundled, [repo], profile=mine).layers["python"]] == [("profile", "MINE"), ("repo", "REPO")]
+  assert [(layer.origin, layer.header) for layer in Library(bundled, [repo], profile=None).layers["python"]] == [("bundled", "--- python (bundled) ---"), ("repo", "--- python (repo) ---")]
 
-  monkeypatch.setattr(agents, "AGENTS", bundled / "agents")
+  monkeypatch.setattr(hub, "REVIEWERS", bundled / "agents")
   monkeypatch.setenv("AGENTS_PROFILE", str(mine))
   definitions = agents.definitions(bundled / "agents")
   assert sorted(definitions) == ["file-review", "my-check"]

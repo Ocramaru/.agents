@@ -7,17 +7,17 @@ Author: Marco Cassar (@Ocramaru)
 import re
 from pathlib import Path
 
-from agentkit import agents, tree
+from agentkit import agents, hub, tree
 from agentkit.frontmatter import load
 from agentkit.notes import NOTES
-from agentkit.standards import GLOBAL, Library
+from agentkit.standards import Library
 
 SCHEMA = "agents-hub/1"
 
 
-def hub() -> dict:
+def bundled() -> dict:
   """The hub's standards and reviewers, for indexers."""
-  root = GLOBAL.parent
+  root = hub.BUNDLED
 
   reviewers = {}
   for name, definition in agents.definitions(root / "agents").items():

@@ -56,7 +56,7 @@ def test_the_profile_its_remote_and_where_each_standard_comes_from(tmp_path):
 
   shown = described(agent(["status"], cwd=repo / "pkg", env={"AGENTS_PROFILE": str(mine)}).stdout)
   assert shown["profile"] == [str(mine), f"remote {bare}", "1 commit not pushed"]
-  assert shown["standards"] == [f"{len(list((REPO / 'standards').glob('*.md'))) - 1} hub, 2 profile, 2 repo"]
+  assert shown["standards"] == [f"{len(list((REPO / 'standards').glob('*.md'))) - 1} bundled, 2 profile, 2 repo"]
   assert shown["notes"] == ["2 on the path from here: ., pkg"]
   assert shown["findings"] == [f"none: no review ledger in {repo.resolve()}"]
 

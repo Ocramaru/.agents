@@ -28,7 +28,7 @@ The package is only `agentkit/`. Everything it reads sits beside it in the repo,
 
 | Lives in the repo root | Read by | Kind |
 |---|---|---|
-| `standards/`, `agents/`, `templates/`, `config.toml` | `standards.GLOBAL`, `agents.AGENTS`, `hub.CONFIG`, `hub.TEMPLATES` | bundled, read-only |
+| `standards/`, `agents/`, `templates/`, `config.toml` | `hub.STANDARDS`, `hub.REVIEWERS`, `hub.CONFIG`, `hub.TEMPLATES` | bundled, read-only |
 | `hooks/`, `githooks/`, `commands/`, `settings.hooks.json`, `bin/agent` | `install`, and `settings.hooks.json` names `$HOME/.agents/hooks/*.sh` | bundled, must sit at a fixed path |
 | `local.toml`, `profile/`, `sessions/`, `.hooks.log` | `profile.path`, `hooks`, the gate | this machine's state, writable |
 | `.git` | `agent update`, `hub.version()`, `issue.slug`, `doctor` | the clone itself |
@@ -77,7 +77,7 @@ Semver, starting at the first install. Bump `version` in `pyproject.toml` and ta
 - [x] `install.sh` becomes `uv tool install ...` then `agent install`; README says so, with the clone as the dev path.
 - [x] `agent install` offers to make a profile, creates the private remote through `gh`, and takes `--profile new|URL|DIR|none`; a test runs it with no terminal and with a temp `HOME`.
 - [x] Preflight the profile URL's reachability before the install writes anything.
-- [x] `agent status`: one read-only screen of what this machine has. The version and whether it is a clone or an install; the profile, its remote and anything unpushed; the default backend, its models and the roles each reviewer asks for; counts of standards (hub, profile, repo), reviewers and note directories on the path from here; open review findings here; whether the Claude hooks and git's `core.hooksPath` are in place; hook errors since `.agents` last changed. `doctor` judges and `status` describes, so the two never repeat each other's lines, and `agent profile` stays for the profile alone.
+- [x] `agent status`: one read-only screen of what this machine has. The version and whether it is a clone or an install; the profile, its remote and anything unpushed; the default backend, its models and the roles each reviewer asks for; counts of standards (bundled, profile, repo), reviewers and note directories on the path from here; open review findings here; whether the Claude hooks and git's `core.hooksPath` are in place; hook errors since `.agents` last changed. `doctor` judges and `status` describes, so the two never repeat each other's lines, and `agent profile` stays for the profile alone.
 - [x] `doctor` warns on a public profile remote, and `agent profile` on a missing one.
 - [x] Ask which backend this machine has on first run and write it to the profile's `config.toml`.
 - [ ] Tag `v0.2.0` once an install on a Mac and on this machine both pass `agent doctor`.

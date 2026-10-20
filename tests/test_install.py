@@ -101,7 +101,7 @@ def test_an_installed_package_reads_its_own_copy_and_keeps_state_in_home(tmp_pat
   site = tmp_path / "site"
   shutil.copytree(install.BUNDLED / "agentkit", site / "agentkit", ignore=shutil.ignore_patterns("__pycache__"))
   (site / "agentkit" / "bundled").mkdir()
-  shown = subprocess.run([sys.executable, "-P", "-c", "from agentkit import agents, hub, profile, standards; print(hub.BUNDLED, hub.HOME, hub.CONFIG, hub.LOCAL, profile.DEFAULT, standards.GLOBAL, agents.AGENTS)"], cwd=tmp_path, capture_output=True, check=True, text=True, env={**os.environ, "PYTHONPATH": str(site), "HOME": str(tmp_path / "home")}).stdout.split()
+  shown = subprocess.run([sys.executable, "-P", "-c", "from agentkit import hub, profile; print(hub.BUNDLED, hub.HOME, hub.CONFIG, hub.LOCAL, profile.DEFAULT, hub.STANDARDS, hub.REVIEWERS)"], cwd=tmp_path, capture_output=True, check=True, text=True, env={**os.environ, "PYTHONPATH": str(site), "HOME": str(tmp_path / "home")}).stdout.split()
   bundled, home = (site / "agentkit" / "bundled").resolve(), tmp_path / "home" / ".agents"
   assert shown == [str(path) for path in (bundled, home, bundled / "config.toml", home / "local.toml", home / "profile", bundled / "standards", bundled / "agents")]
   assert install.BUNDLED == install.HOME == REPO   # a checkout is its own state

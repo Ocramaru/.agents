@@ -49,7 +49,7 @@ def checks() -> list[tuple[bool, str, str]]:
       for reference in standard.list(field): out.append((reference in library.layers, f"standard {name} {field} {reference}", f"{reference} does not exist; fix the {field} in {standard.path.name}"))
     out.append((bool(standard.get("description")), f"standard {name} has a description", "add one; it is what shows when the body is not loaded"))
 
-  for definition_file in sorted((hub.BUNDLED / "agents").glob("*.md")):
+  for definition_file in sorted(hub.REVIEWERS.glob("*.md")):
     definition = load(definition_file)
     for reference in definition.list("standards"): out.append((reference in library.layers, f"agent {definition.name} judges against {reference}", f"{reference} does not exist; fix the standards list in {definition_file.name}"))
 

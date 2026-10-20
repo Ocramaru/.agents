@@ -89,4 +89,4 @@ def cmd_split(args) -> int:
 @command("manifest", help="machine-readable description of the hub, for indexers")
 @arg("--notes", nargs="?", const=".", metavar="ROOT", help="instead list .agents note directories under ROOT (default: here)")
 def cmd_manifest(args) -> int:
-  return dump(manifest.notes(args.notes) if args.notes is not None else manifest.hub())
+  return dump(manifest.notes(args.notes) if args.notes is not None else manifest.bundled())

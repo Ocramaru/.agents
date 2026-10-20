@@ -10,14 +10,13 @@ from agentkit import config, git, hub, notes, profile as _profile
 from agentkit.frontmatter import Doc, load
 from agentkit.standards import Library
 
-AGENTS = hub.BUNDLED / "agents"
 
-
-def definitions(root: Path = AGENTS) -> dict[str, Doc]:
+def definitions(root: Path | None = None) -> dict[str, Doc]:
   """Every reviewer definition by name, the profile's replacing .agents' own, with [review]'s `model` where none is named."""
   default = config.section("review", git.root(Path.cwd()) or Path.cwd())["model"]
+  root = Path(hub.REVIEWERS if root is None else root)
 
-  found = {path.stem: load(path) for directory in (Path(root), _profile.file("agents") if Path(root) == AGENTS else None) if directory for path in sorted(directory.glob("*.md"))}
+  found = {path.stem: load(path) for directory in (root, _profile.file("agents") if root == hub.REVIEWERS else None) if directory for path in sorted(directory.glob("*.md"))}
   for definition in found.values(): definition.meta.setdefault("model", default)
   return found
 

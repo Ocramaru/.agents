@@ -1,5 +1,5 @@
 """Which standards govern a file: match `applies` on the basename, then follow `extends` and `related`.
-Standards layer rather than replace: a repo's `.agents/standards/python.md` is sent after the machine-wide one, and wins where they disagree.
+Standards layer rather than replace: a repo's `.agents/standards/python.md` is sent after the bundled one, and wins where they disagree.
 A dot in a name is a namespace (`ml.runs` layers under `ml`) and a hyphen a compound word; `extends` names a base explicitly.
 
 Author: Marco Cassar (@Ocramaru)
@@ -12,7 +12,6 @@ from pathlib import Path
 from agentkit import hub, profile as _profile
 from agentkit.frontmatter import Doc, load
 
-GLOBAL = hub.BUNDLED / "standards"
 AUTO = object()   # the profile goes with the bundled set, and with nothing else
 
 
@@ -62,15 +61,15 @@ class Layer:
 
 
 class Library:
-  """The standards in force: the machine-wide set, then the profile, then the repo."""
-  def __init__(self, root: Path = GLOBAL, overrides: list[Path] | None = None,
+  """The standards in force: the bundled set, then the profile, then the repo."""
+  def __init__(self, root: Path | None = None, overrides: list[Path] | None = None,
                extra_applies: dict[str, list[str]] | None = None, profile=AUTO):
-    self.root = Path(root)
+    self.root = Path(hub.STANDARDS if root is None else root)
     self.overrides = list(overrides or [])
     self.extra_applies = extra_applies or {}  # a repo naming its own files for a standard
 
     # a root other than the bundled set, as every test passes, is used alone, without the profile
-    if profile is AUTO: profile = _profile.file("standards") if self.root == GLOBAL else None
+    if profile is AUTO: profile = _profile.file("standards") if self.root == hub.STANDARDS else None
     self.profile = Path(profile) if profile else None
 
   @functools.cached_property
@@ -79,11 +78,11 @@ class Library:
     out: dict[str, list[Layer]] = {}
     mine = {load(file).name for file in self.profile.glob("*.md")} if self.profile and self.profile.is_dir() else set()
 
-    for directory, origin in [(self.root, "machine-wide"), (self.profile, "profile")] + [(directory, "repo") for directory in self.overrides]:
+    for directory, origin in [(self.root, "bundled"), (self.profile, "profile")] + [(directory, "repo") for directory in self.overrides]:
       if not (directory and Path(directory).is_dir()): continue
       for file in sorted(Path(directory).glob("*.md")):
         document = load(file)
-        if origin == "machine-wide" and document.name in mine: continue   # a profile standard replaces the starter of its name
+        if origin == "bundled" and document.name in mine: continue   # a profile standard replaces the starter of its name
         out.setdefault(document.name, []).append(Layer(document, origin))
     return out
 

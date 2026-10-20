@@ -1,4 +1,4 @@
-# Machine-wide settings: review, injection, the formatter guard and the backends reviews run on. A profile's config.toml and this
+# The bundled settings: review, injection, the formatter guard and the backends reviews run on. A profile's config.toml and this
 # machine's local.toml layer over it, and a repo sets its own [review], [guard] and `inject` in its .agents/agents.toml.
 
 [review]
