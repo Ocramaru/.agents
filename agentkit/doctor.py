@@ -15,7 +15,6 @@ from pathlib import Path
 from agentkit import agents, backends, config, gh, git, guard, hooks, hub, inject, install, mapblock, notes, profile, tree
 from agentkit.frontmatter import load
 from agentkit.standards import Library
-MODES = ("full", "context", "none")   # what agents.toml `inject` may say
 
 
 def checks() -> list[tuple[bool, str, str]]:
@@ -66,7 +65,7 @@ def checks() -> list[tuple[bool, str, str]]:
   for agents_dir in note_dirs:
     links = tree.toml(agents_dir)
     for name in inject.flatten_applies(links.get("applies") or {}): out.append((name in library.layers, f"{agents_dir.parent.name}/agents.toml applies -> {name}", f"no standard named {name}; check the spelling in {agents_dir / 'agents.toml'}"))
-    if (mode := links.get("inject")) is not None: out.append((mode in MODES, f"{agents_dir.parent.name}/agents.toml inject = {mode!r}", f"inject must be one of {', '.join(MODES)}"))   # any other value falls through to the default unreported
+    if (mode := links.get("inject")) is not None: out.append((mode in tree.INJECT_MODES, f"{agents_dir.parent.name}/agents.toml inject = {mode!r}", f"inject must be one of {', '.join(tree.INJECT_MODES)}"))   # any other value falls through to the default unreported
 
   known, default = backends.load_backends()
   out.append((default in known, f"default backend {default} is one of [backends]" if default else "a default backend is set, so reviews have somewhere to run", f"fix `default` under [backends] in config.toml; known: {', '.join(known)}" if default else "`agent install` at a terminal asks, or `agent install --backend <name>`"))
