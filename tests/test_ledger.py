@@ -9,7 +9,7 @@ from contextlib import nullcontext
 import pytest
 from conftest import Stub, findings, git, note, put, record, run_review
 
-from agentkit import agents, cli, command, doctor, hooks, inject, review, reviews, tree
+from agentkit import agents, cli, command, doctor, git as agentkit_git, hooks, inject, review, reviews
 from agentkit.cli import out, show
 
 
@@ -116,8 +116,8 @@ def test_a_dismissal_made_in_a_worktree_reaches_the_main_checkout_and_nothing_el
   run("clone", "-q", "--bare", ".", str(elsewhere / "hidden" / ".git"))   # a bare repo kept in .git has no work tree
   run("worktree", "add", "-q", str(elsewhere / "hidden-worktree"), cwd=elsewhere / "hidden" / ".git")
   linked = main / ".claude" / "worktrees" / "feature"
-  assert tree.main_checkout(linked) == main.resolve() and tree.main_checkout(main) is None
-  assert tree.main_checkout(elsewhere / "bare-worktree") is None and tree.main_checkout(elsewhere / "hidden-worktree") is None
+  assert agentkit_git.main_checkout(linked) == main.resolve() and agentkit_git.main_checkout(main) is None
+  assert agentkit_git.main_checkout(elsewhere / "bare-worktree") is None and agentkit_git.main_checkout(elsewhere / "hidden-worktree") is None
 
   with duckdb.connect(str(reviews.path(main))) as connection: connection.execute(reviews.SCHEMA + "alter table closures add column note text;")   # a main ledger on a newer schema
   reviews.write(record(linked, "t-a", "a.py", [{"line": 1, "issue": "backwards"}, {"line": 2, "issue": "stale comment"}, {"line": 3, "issue": "typo"}]), linked)
@@ -134,7 +134,7 @@ def test_a_dismissal_made_in_a_worktree_reaches_the_main_checkout_and_nothing_el
   assert {file: [row["issue"] for row in rows] for file, rows in reviews.dismissals(linked).items()} == {"a.py": ["backwards"], "mod.py": ["unused"]}   # main's too, and its own once
 
   with monkeypatch.context() as patch:   # closed as it was before dismissals travelled
-    patch.setattr(tree, "main_checkout", lambda directory: None)
+    patch.setattr(agentkit_git, "main_checkout", lambda directory: None)
     reviews.close(linked, "a.py", 2, "wontfix", "the comment is current")
   source = str(reviews.path(linked, create=False))
   assert cli.main(["sub", "import", source, "--root", str(main)]) == 0

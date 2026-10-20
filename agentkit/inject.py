@@ -9,7 +9,7 @@ import hashlib
 import tempfile
 from pathlib import Path
 
-from agentkit import notes, tree
+from agentkit import git, notes, tree
 from agentkit.standards import GLOBAL, Library, scoped
 
 MENTION = "Not loaded. Read one when you have a reason to."
@@ -83,7 +83,7 @@ def open_findings(path: Path) -> list[dict]:
   """What the newest review of this file still reports.
   It returns nothing rather than fail an edit, and checks for the ledger first so an unreviewed repo never imports duckdb."""
   path = Path(path).resolve()
-  root = tree.git_root(path.parent) or path.parent
+  root = git.root(path.parent) or path.parent
 
   try:
     from agentkit import reviews

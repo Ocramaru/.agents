@@ -7,11 +7,10 @@ Author: Marco Cassar (@Ocramaru)
 
 import fnmatch
 import os
-import subprocess
 import tomllib
 from pathlib import Path
 
-from agentkit import config, hub, notes
+from agentkit import config, git, hub, notes
 from agentkit.frontmatter import load
 
 LINKS = "agents.toml"
@@ -32,7 +31,6 @@ SKIP = frozenset({
 def ignored(name: str) -> bool:
   """Whether nothing should read a directory of this name; `*.egg-info` is matched by its end."""
   return name in SKIP or name.endswith(".egg-info")
-_ROOTS: dict[Path, Path | None] = {}
 
 
 def toml(agents_dir: Path) -> dict:
@@ -45,25 +43,6 @@ def is_hub(agents_dir: Path) -> bool:
   """Whether this note directory belongs to the hub repo itself."""
   parent = Path(agents_dir).parent
   return (parent / "standards").is_dir() and (parent / "agents").is_dir()
-
-
-def git_root(directory: Path) -> Path | None:
-  """The repository root containing `directory`, or None; cached."""
-  directory = Path(directory)
-  if directory not in _ROOTS:
-    result = subprocess.run(["git", "-C", str(directory), "rev-parse", "--show-toplevel"], capture_output=True, check=False, text=True)
-    _ROOTS[directory] = Path(result.stdout.strip()) if result.returncode == 0 else None
-  return _ROOTS[directory]
-
-
-def main_checkout(directory: Path) -> Path | None:
-  """The main checkout of the linked worktree holding `directory`, or None anywhere else.
-  A bare repo's worktrees and a submodule's have no main checkout: the common dir is not a `.git`, or one with no work tree."""
-  result = subprocess.run(["git", "-C", str(directory), "rev-parse", "--git-dir", "--git-common-dir"], capture_output=True, check=False, text=True)
-  if result.returncode: return None
-  git_dir, common = ((Path(directory) / line).resolve() for line in result.stdout.splitlines())   # relative to `directory` when git does not print them absolute
-  if git_dir == common or common.name != ".git": return None
-  return common.parent if git_root(common.parent) == common.parent else None
 
 
 def find_note_dirs(root: Path) -> list[Path]:
@@ -85,7 +64,7 @@ def chain(path: Path) -> list[Path]:
   """
   start = Path(path).resolve()
   start = start if start.is_dir() else start.parent
-  stop = git_root(start) or Path.home()   # a repo is the unit a collaborator reproduces
+  stop = git.root(start) or Path.home()   # a repo is the unit a collaborator reproduces
 
   found, current = [], start
   while True:
@@ -185,7 +164,7 @@ def label(agents_dir: Path) -> str:
   """A note directory's scope, repo-relative where possible, so injected text is the same wherever the hook ran; a `.local` is its parent's plus `/.local`."""
   if agents_dir.name == ".local": return f"{label(agents_dir.parent)}/.local"
   scope = Path(agents_dir).parent
-  root = git_root(scope)
+  root = git.root(scope)
 
   for base in (root, Path.home()):
     if not base: continue

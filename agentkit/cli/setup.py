@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agentkit import backends, config, doctor, git, guard, hooks, hub, install, issue, profile, reviews, status, tree, version
+from agentkit import backends, config, doctor, git, guard, hooks, hub, install, issue, profile, reviews, status, version
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli.out import done, escape, fail, line, note, report, table
 
@@ -108,7 +108,7 @@ def cmd_hook(args) -> int:
       return done(f"{'on' if ours else 'off'}  core.hooksPath = {current or '(unset)'}", code=0 if ours else 1)
     return report(*(install.global_install if args.action == "install" else install.global_uninstall)())
 
-  root = tree.git_root(Path(args.repo).resolve())
+  root = git.root(Path(args.repo).resolve())
   if root is None: return fail(f"{Path(args.repo).resolve()} is not a git repo", 2)
   destination = root / ".git" / "hooks" / "post-commit"
 
@@ -156,7 +156,7 @@ def cmd_hooks(args) -> int:
 @command("guard", help="name the whole-file rewriter a shell command would run, if any")
 @arg("command", help="the shell command to check, quoted as one argument")
 def cmd_guard(args) -> int:
-  if not (found := guard.formatter(args.command, settings := config.section("guard", tree.git_root(Path.cwd())))): return 0
+  if not (found := guard.formatter(args.command, settings := config.section("guard", git.root(Path.cwd())))): return 0
   return done(f"{found}: {settings['advice']}" if settings["advice"] else found, code=2)   # 2 is the code the hook turns into a block
 
 

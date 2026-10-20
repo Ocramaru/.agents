@@ -16,7 +16,7 @@ import urllib.parse
 import webbrowser
 from pathlib import Path
 
-from agentkit import git, tree, version
+from agentkit import git, version
 from agentkit.hub import BUNDLED, INSTALLED
 
 LINK_LIMIT = 8000   # characters a browser will take in a link
@@ -79,7 +79,7 @@ def draft(title: str, body: str, working_directory: Path, repository: str, dry: 
   foot = f"agentkit {version()} · {platform.system()}"
 
   if context:   # issues on .agents are public, and a hostname or a private repo's name is not theirs
-    root = tree.git_root(working_directory)
+    root = git.root(working_directory)
     foot += f" · met in {root.name if root else working_directory} · {socket.gethostname()}"
   full = f"{body.strip()}\n\n---\n{foot}" if body.strip() else foot
 

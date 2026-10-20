@@ -57,7 +57,7 @@ def checks() -> list[tuple[bool, str, str]]:
   note_dirs = tree.find_note_dirs(here)   # walked once, since over a large tree it is the slow part
 
   # a hand-edited config that does not parse is reported, and every check below waits until it does
-  broken, root = [], tree.git_root(here)
+  broken, root = [], git.root(here)
   for file in dict.fromkeys(path for path in [hub.CONFIG, profile.file("config.toml"), hub.LOCAL, *(directory / tree.LINKS for directory in [*note_dirs, *((root / ".agents", root / ".agents" / ".local") if root else ())])] if path and path.is_file()):
     try: tomllib.loads(file.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as error: broken.append((False, f"{file} parses as TOML", f"fix it: {error}"))
@@ -79,7 +79,7 @@ def checks() -> list[tuple[bool, str, str]]:
     executable = (backend.spec.get("argv") or [""])[0]
     out.append((bool(executable and shutil.which(executable)), f"backend {name} -> {executable or '(no argv)'}", f"install {executable}, or drop it" if executable else f"give backend {name} an argv under [backends.{name}] in config.toml"))
 
-  formatter = guard.precommit_formatter(config.section("guard", tree.git_root(here)), here)   # catches a formatter hook added to a repo later
+  formatter = guard.precommit_formatter(config.section("guard", git.root(here)), here)   # catches a formatter hook added to a repo later
   out.append((not (formatter and (here / ".git" / "hooks" / "pre-commit").is_file()), "no commit hook here runs a formatter", f"pre-commit is installed and its config runs {formatter}; drop the hook or the config entry"))
 
   editor_settings = here / ".vscode" / "settings.json"

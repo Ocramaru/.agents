@@ -13,7 +13,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from agentkit import agents, backends, config, git, hooks, review, reviews, tree
+from agentkit import agents, backends, config, git, hooks, review, reviews
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli import show
 from agentkit.cli.setup import settle
@@ -68,7 +68,7 @@ def cmd_run(args) -> int:
   body = agents.prompt([(path, Path(path).read_text(encoding="utf-8")) for path in args.paths], changed=args.changed)
   if not body: return fail("nothing to check: pass --changed or some files", 2)
 
-  root = tree.git_root(Path.cwd()) or Path.cwd()
+  root = git.root(Path.cwd()) or Path.cwd()
   task = args.task or f"{args.agent}-{hashlib.sha1(body.encode()).hexdigest()[:8]}"
   conversation = reviews.conversation(reviews.latest(task, root)) or Session(task)
 
@@ -133,7 +133,7 @@ def cmd_review(args) -> int:
 
   if args.recheck and args.commit: return fail("--recheck reads the ledger and --commit reads a commit; use one", 2)
   if args.recheck or args.commit:
-    root = tree.git_root(Path.cwd()) or Path.cwd()
+    root = git.root(Path.cwd()) or Path.cwd()
     touched = git.run(root, "diff-tree", "--no-commit-id", "--name-only", "-z", "-r", "--root", args.commit) if args.commit else None
     # NUL-separated: a whitespace split breaks a spaced path, and git quotes a non-ASCII one per line; a deleted file has nothing left to review
     if touched and touched.returncode: return fail(f"git could not read {args.commit}: {touched.stderr.strip()}", 2)
@@ -145,7 +145,7 @@ def cmd_review(args) -> int:
     files = sorted(path.resolve() for path in given if path.is_file())
     roots = [path.resolve() for path in given if path.is_dir()]
     root = roots[0] if roots else (files[0].parent if files else Path.cwd())
-    root = tree.git_root(root) or root
+    root = git.root(root) or root
 
   settings = config.section("review", root, add=("exclude",))   # excludes accumulate from every layer; anything else, the nearest wins
   exclude = [] if args.no_config_excludes else list(settings["exclude"])
@@ -231,7 +231,7 @@ def _unreviewed(paths: list[Path], root: Path) -> None:
 
 def _subfolder(root: Path) -> str | None:
   """The folder you stand in, relative to the repo, when it is below the repo's root: where a listing defaults to."""
-  base, here = (tree.git_root(root) or root).resolve(), Path.cwd().resolve()
+  base, here = (git.root(root) or root).resolve(), Path.cwd().resolve()
   return f"{here.relative_to(base).as_posix()}/" if here != base and here.is_relative_to(base) else None
 
 
@@ -291,7 +291,7 @@ def cmd_close(args) -> int:
     return fail(f"--as {args.verdict} needs a --reason: the next review reads it so it does not raise this again", 2)
 
   root = _repo(args.root)
-  base = tree.git_root(root) or root
+  base = git.root(root) or root
 
   missed = []
   for target in args.targets:

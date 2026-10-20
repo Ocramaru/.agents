@@ -18,7 +18,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from agentkit import agents, hub, tree
+from agentkit import agents, git, hub
 from agentkit.session import Message, Session
 
 DIR = ".reviews"
@@ -69,7 +69,7 @@ def author() -> str:
 
 def path(root: Path, create: bool = True) -> Path:
   """The database under the repo's outermost `.agents`. A repo's reviews belong to that repo."""
-  directory = (tree.git_root(root) or Path(root)) / ".agents" / DIR
+  directory = (git.root(root) or Path(root)) / ".agents" / DIR
 
   if create:
     directory.mkdir(parents=True, exist_ok=True)
@@ -290,7 +290,7 @@ def open_findings(root: Path) -> list[dict]:
 
 def _open(connection, root: Path) -> list[dict]:
   """`open_findings` on a connection already open. Paths come back relative to the repo, since a stored one may be the absolute path a model echoed."""
-  base = (tree.git_root(root) or Path(root)).resolve()
+  base = (git.root(root) or Path(root)).resolve()
   closed = "and f.id not in (select finding_id from closures)" if _has(connection, "closures") else ""
   rows = _select(connection, f"""
     select f.id, f.file, f.line, f.issue, f.fix, f.task, r.agent, r.at{", r.run" if _has(connection, "reviews", "run") else ""}
@@ -322,7 +322,7 @@ def to_recheck(root: Path) -> dict[str, list[str]]:
     for finding in _open(connection, root): out.setdefault(finding["agent"], set()).add(finding["file"])
 
     if _has(connection, "closures"):
-      base = tree.git_root(root) or Path(root)
+      base = git.root(root) or Path(root)
       for row in _select(connection, f"""select distinct c.file, (select agent from reviews r where r.task = c.task limit 1) as agent
                                from closures c where c.verdict = 'fixed'
                                  and c."at" > (select max("at") from reviews r2 where r2.task = c.task and {SUPERSEDES})"""):
@@ -366,7 +366,7 @@ def close(root: Path, file: str, line: int, verdict: str, reason: str = "") -> l
   who, now = author(), time.time()
   closures = [{"id": str(uuid7()), "finding_id": finding["id"], "task": finding["task"], "file": finding["file"], "line": finding["line"], "issue": finding["issue"], "author": who, "at": now, "verdict": verdict, "reason": reason} for finding in hits]
   # a dismissal judges code that lands unchanged, so a worktree's main checkout keeps it too, under the same id; a fix lands with its code
-  for ledger in ([root, main] if verdict in KEEP_QUIET and closures and (main := tree.main_checkout(root)) else [root]):
+  for ledger in ([root, main] if verdict in KEEP_QUIET and closures and (main := git.main_checkout(root)) else [root]):
     with writer(ledger) as put:
       for closure in closures: put({"closure": closure})
   return hits
@@ -376,7 +376,7 @@ def dismissals(root: Path) -> dict[str, list[dict]]:
   """What was closed as wrong or not worth fixing, by file, for the reviewer to read next time.
   A linked worktree reads its main checkout's as well, where every worktree's dismissals also land."""
   found: dict[str, dict] = {}
-  for ledger in filter(None, (root, tree.main_checkout(root))):
+  for ledger in filter(None, (root, git.main_checkout(root))):
     with _reading(ledger) as connection:
       if connection is None or not _has(connection, "closures"): continue
       # by id, since a dismissal made in a worktree is in both ledgers

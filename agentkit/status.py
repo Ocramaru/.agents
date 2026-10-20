@@ -48,7 +48,7 @@ def counts() -> list[tuple[str, str]]:
 
 def findings() -> list[tuple[str, str]]:
   """Open review findings in the repo holding the working directory; reading them takes duckdb, which may be missing."""
-  root = tree.git_root(Path.cwd())
+  root = git.root(Path.cwd())
   if root is None: return [("findings", "none: not in a git repo")]
   if not reviews.path(root, create=False).is_file(): return [("findings", f"none: no review ledger in {root}")]   # before duckdb, which a repo never reviewed does not need
 
