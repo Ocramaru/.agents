@@ -13,7 +13,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from agentkit import agents, backends, hooks, profile, review, reviews, tree
+from agentkit import agents, backends, git, hooks, profile, review, reviews, tree
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli import show
 from agentkit.cli.setup import settle
@@ -134,7 +134,7 @@ def cmd_review(args) -> int:
   if args.recheck and args.commit: return fail("--recheck reads the ledger and --commit reads a commit; use one", 2)
   if args.recheck or args.commit:
     root = tree.git_root(Path.cwd()) or Path.cwd()
-    touched = profile.git(root, "diff-tree", "--no-commit-id", "--name-only", "-z", "-r", "--root", args.commit) if args.commit else None
+    touched = git.run(root, "diff-tree", "--no-commit-id", "--name-only", "-z", "-r", "--root", args.commit) if args.commit else None
     # NUL-separated: a whitespace split breaks a spaced path, and git quotes a non-ASCII one per line; a deleted file has nothing left to review
     if touched and touched.returncode: return fail(f"git could not read {args.commit}: {touched.stderr.strip()}", 2)
     files, roots = [path for name in touched.stdout.split("\0") if name and (path := root / name).is_file()] if touched else [], []

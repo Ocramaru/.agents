@@ -5,11 +5,11 @@ Author: Marco Cassar (@Ocramaru)
 
 import pytest
 
-from agentkit import profile
+from agentkit import hub, profile
 from agentkit.guard import formatter
 from conftest import git
 
-# the shipped runners over a list of our own, so the cases hold whichever formatters ship, on or off
+# the bundled runners over a list of our own, so the cases hold whichever formatters ship, on or off
 SETTINGS = {**profile.section("guard"), "enabled": True, "formatters": ["black", "prettier", "ruff format", "ruff check --unsafe-fixes"], "targets": ["fmt", "format"]}
 
 
@@ -50,14 +50,14 @@ def test_pre_commit_is_judged_by_what_its_config_runs(tmp_path):
   assert "ruff-format" in formatter("pre-commit run --all-files", SETTINGS, fmt)
 
 
-def test_the_shipped_list_lets_gofmt_run():
+def test_the_bundled_list_lets_gofmt_run():
   """Go's own formatter is its layout, so the go standard's `gofmt -w` is never refused."""
   assert formatter("gofmt -w main.go", {**profile.section("guard"), "enabled": True}) is None and formatter("go fmt ./...", {**profile.section("guard"), "enabled": True}) is None
 
 
 def test_local_toml_and_then_a_repo_turn_it_off(tmp_path, monkeypatch):
   """A machine with no profile turns it on in local.toml; a fork whose upstream runs a formatter turns it off in its agents.toml."""
-  monkeypatch.setattr(profile, "LOCAL", tmp_path / "local.toml")
+  monkeypatch.setattr(hub, "LOCAL", tmp_path / "local.toml")
   monkeypatch.setattr(profile, "DEFAULT", tmp_path / "no-profile")
   monkeypatch.delenv("AGENTS_PROFILE")
   (tmp_path / "local.toml").write_text('[guard]\nenabled = true\nformatters = ["mine"]\n')

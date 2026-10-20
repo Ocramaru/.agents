@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from conftest import git
 
-from agentkit import doctor, inject, notes, profile, tree
+from agentkit import doctor, hub, inject, notes, tree
 
 HEAD = "---\nname: context\nkind: context\n---\n\n"
 SECTIONS = """# r
@@ -42,11 +42,11 @@ def send(path: Path, session: str) -> str:
 
 
 def configure(tmp_path: Path, monkeypatch, config: str) -> None:
-  """A profile holding only this config.toml, layered over the shipped one."""
+  """A profile holding only this config.toml, layered over the bundled one."""
   (tmp_path / "profile").mkdir(exist_ok=True)
   (tmp_path / "profile" / "config.toml").write_text(config)
   monkeypatch.setenv("AGENTS_PROFILE", str(tmp_path / "profile"))
-  monkeypatch.setattr(profile, "LOCAL", tmp_path / "local.toml")   # never this machine's
+  monkeypatch.setattr(hub, "LOCAL", tmp_path / "local.toml")   # never this machine's
 
 
 @pytest.fixture

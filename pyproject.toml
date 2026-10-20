@@ -21,17 +21,17 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["agentkit"]
 
-# What the hub reads beside its code, laid out as in the repo under the package, where profile.SHIPPED finds it.
+# What the hub reads beside its code, laid out as in the repo under the package, where hub.BUNDLED finds it.
 [tool.hatch.build.targets.wheel.force-include]
-"AGENTS.md" = "agentkit/shipped/AGENTS.md"
-"agents" = "agentkit/shipped/agents"
-"commands" = "agentkit/shipped/commands"
-"config.toml" = "agentkit/shipped/config.toml"
-"githooks" = "agentkit/shipped/githooks"
-"hooks" = "agentkit/shipped/hooks"
-"settings.hooks.json" = "agentkit/shipped/settings.hooks.json"
-"standards" = "agentkit/shipped/standards"
-"templates" = "agentkit/shipped/templates"
+"AGENTS.md" = "agentkit/bundled/AGENTS.md"
+"agents" = "agentkit/bundled/agents"
+"commands" = "agentkit/bundled/commands"
+"config.toml" = "agentkit/bundled/config.toml"
+"githooks" = "agentkit/bundled/githooks"
+"hooks" = "agentkit/bundled/hooks"
+"settings.hooks.json" = "agentkit/bundled/settings.hooks.json"
+"standards" = "agentkit/bundled/standards"
+"templates" = "agentkit/bundled/templates"
 
 [tool.uv]
 package = true           # a checkout's venv holds agentkit editable, so its `agent` runs its own code

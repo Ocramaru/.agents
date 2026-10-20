@@ -16,8 +16,8 @@ import urllib.parse
 import webbrowser
 from pathlib import Path
 
-from agentkit import tree, version
-from agentkit.profile import INSTALLED, SHIPPED, git
+from agentkit import git, tree, version
+from agentkit.hub import BUNDLED, INSTALLED
 
 LINK_LIMIT = 8000   # characters a browser will take in a link
 
@@ -36,9 +36,9 @@ def login() -> str:
   return user.stdout.strip() if user.returncode == 0 else ""
 
 
-def slug(hub: Path = SHIPPED) -> str | None:
+def slug(hub: Path = BUNDLED) -> str | None:
   """owner/name of the hub on GitHub: a clone's origin remote, or the Repository URL an install carries in its metadata."""
-  return named(dict(entry.split(", ", 1) for entry in importlib.metadata.metadata("agentkit").get_all("Project-URL") or []).get("Repository", "") if INSTALLED else git(hub, "remote", "get-url", "origin").stdout.strip())
+  return named(dict(entry.split(", ", 1) for entry in importlib.metadata.metadata("agentkit").get_all("Project-URL") or []).get("Repository", "") if INSTALLED else git.run(hub, "remote", "get-url", "origin").stdout.strip())
 
 
 def named(address: str) -> str | None:

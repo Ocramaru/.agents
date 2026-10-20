@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from conftest import git, note, put
 
-from agentkit import agents as ag, inject, mapblock, notes, profile, review, tree
+from agentkit import agents as ag, hub, inject, mapblock, notes, review, tree
 from agentkit.frontmatter import parse
 from agentkit.standards import Library
 
@@ -47,7 +47,7 @@ def test_a_section_naming_a_file_governs_that_file_alone(tmp_path):
 
 def test_a_repos_agents_toml_reaches_inject_and_review_alike(tmp_path, monkeypatch):
   """[applies] in either TOML shape names a repo's own files, for inject and for review routing."""
-  monkeypatch.setattr(profile, "LOCAL", tmp_path / "local.toml")
+  monkeypatch.setattr(hub, "LOCAL", tmp_path / "local.toml")
   assert inject.flatten_applies({"voice": "projects.json"}) == {"voice": ["projects.json"]}
   assert inject.flatten_applies({"ml": {"runs": ["t.py"]}}) == {"ml.runs": ["t.py"]}
 

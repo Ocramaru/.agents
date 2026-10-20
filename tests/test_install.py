@@ -83,7 +83,7 @@ def test_install_wires_claude_once_and_leaves_the_rest_alone(home):
   assert "PreToolUse" in json.loads(settings.read_text())["hooks"]
   assert sorted(saved.read_text() for saved in settings.parent.glob("settings.json.bak*")) == ["older", '{"permissions": {"allow": ["Bash(ls)"]}}']
   assert (home / ".agents").resolve() == install.HOME   # linked, since it was missing
-  assert (home / ".local" / "bin" / "agent").resolve() == install.SHIPPED / "bin" / "agent"
+  assert (home / ".local" / "bin" / "agent").resolve() == install.BUNDLED / "bin" / "agent"
   assert (home / ".claude" / "CLAUDE.md").read_text().count("AGENTS.md") == 1
 
   code, lines = install.run([])
@@ -97,24 +97,24 @@ def test_install_wires_claude_once_and_leaves_the_rest_alone(home):
 
 
 def test_an_installed_package_reads_its_own_copy_and_keeps_state_in_home(tmp_path):
-  """A package carrying `shipped/` reads standards, reviewers and config from it and keeps state in ~/.agents; a checkout is both."""
+  """A package carrying `bundled/` reads standards, reviewers and config from it and keeps state in ~/.agents; a checkout is both."""
   site = tmp_path / "site"
-  shutil.copytree(install.SHIPPED / "agentkit", site / "agentkit", ignore=shutil.ignore_patterns("__pycache__"))
-  (site / "agentkit" / "shipped").mkdir()
-  shown = subprocess.run([sys.executable, "-P", "-c", "from agentkit import agents, profile, standards; print(profile.SHIPPED, profile.HOME, profile.CONFIG, profile.LOCAL, profile.DEFAULT, standards.GLOBAL, agents.AGENTS)"], cwd=tmp_path, capture_output=True, check=True, text=True, env={**os.environ, "PYTHONPATH": str(site), "HOME": str(tmp_path / "home")}).stdout.split()
-  shipped, home = (site / "agentkit" / "shipped").resolve(), tmp_path / "home" / ".agents"
-  assert shown == [str(path) for path in (shipped, home, shipped / "config.toml", home / "local.toml", home / "profile", shipped / "standards", shipped / "agents")]
-  assert install.SHIPPED == install.HOME == REPO   # a checkout is its own state
+  shutil.copytree(install.BUNDLED / "agentkit", site / "agentkit", ignore=shutil.ignore_patterns("__pycache__"))
+  (site / "agentkit" / "bundled").mkdir()
+  shown = subprocess.run([sys.executable, "-P", "-c", "from agentkit import agents, hub, profile, standards; print(hub.BUNDLED, hub.HOME, hub.CONFIG, hub.LOCAL, profile.DEFAULT, standards.GLOBAL, agents.AGENTS)"], cwd=tmp_path, capture_output=True, check=True, text=True, env={**os.environ, "PYTHONPATH": str(site), "HOME": str(tmp_path / "home")}).stdout.split()
+  bundled, home = (site / "agentkit" / "bundled").resolve(), tmp_path / "home" / ".agents"
+  assert shown == [str(path) for path in (bundled, home, bundled / "config.toml", home / "local.toml", home / "profile", bundled / "standards", bundled / "agents")]
+  assert install.BUNDLED == install.HOME == REPO   # a checkout is its own state
 
 
-def test_the_wheel_carries_the_package_and_every_shipped_file_and_nothing_of_this_machine(wheel):
-  """The wheel holds agentkit, the hub's tracked files under agentkit/shipped with the hooks executable, and the `agent` entry point."""
+def test_the_wheel_carries_the_package_and_every_bundled_file_and_nothing_of_this_machine(wheel):
+  """The wheel holds agentkit, the hub's tracked files under agentkit/bundled with the hooks executable, and the `agent` entry point."""
   tracked = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "agentkit", "AGENTS.md", "agents", "commands", "config.toml", "githooks", "hooks", "settings.hooks.json", "standards", "templates"], cwd=REPO, capture_output=True, check=True, text=True).stdout.split()
   with zipfile.ZipFile(wheel) as archive:
     modes = {info.filename: info.external_attr >> 16 for info in archive.infolist() if not info.filename.startswith("agentkit-")}
     entry_points = archive.read(next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"))).decode()
-  assert sorted(modes) == sorted(name if name.startswith("agentkit/") else f"agentkit/shipped/{name}" for name in tracked)
-  assert all(mode & 0o111 for name, mode in modes.items() if name.startswith(("agentkit/shipped/hooks/", "agentkit/shipped/githooks/")))
+  assert sorted(modes) == sorted(name if name.startswith("agentkit/") else f"agentkit/bundled/{name}" for name in tracked)
+  assert all(mode & 0o111 for name, mode in modes.items() if name.startswith(("agentkit/bundled/hooks/", "agentkit/bundled/githooks/")))
   assert "agent = agentkit.__main__:main" in entry_points
 
 
@@ -152,14 +152,14 @@ def test_an_install_copies_what_agents_name_by_path_into_home_and_its_hooks_reac
 
 
 def test_an_installs_stale_copies_are_files_nested_ones_included(tmp_path, monkeypatch):
-  """stale() names every shipped file beneath the fixed paths whose copy is missing or differs, and never a directory, which a copy would fail on."""
-  shipped, home = tmp_path / "shipped", tmp_path / "home"
-  put(shipped, "AGENTS.md", "hooks/a.sh", "githooks/_dispatch", "commands/nested/b.md")
+  """stale() names every bundled file beneath the fixed paths whose copy is missing or differs, and never a directory, which a copy would fail on."""
+  bundled, home = tmp_path / "bundled", tmp_path / "home"
+  put(bundled, "AGENTS.md", "hooks/a.sh", "githooks/_dispatch", "commands/nested/b.md")
   put(home, "hooks/a.sh")
   monkeypatch.setattr(install, "INSTALLED", True)
-  monkeypatch.setattr(install, "SHIPPED", shipped)
+  monkeypatch.setattr(install, "BUNDLED", bundled)
   monkeypatch.setattr(install, "HOME", home)
-  assert [str(source.relative_to(shipped)) for source in install.stale()] == ["AGENTS.md", "commands/nested/b.md", "githooks/_dispatch"]
+  assert [str(source.relative_to(bundled)) for source in install.stale()] == ["AGENTS.md", "commands/nested/b.md", "githooks/_dispatch"]
 
 
 def test_update_upgrades_an_install_through_uv_and_lands_the_new_hooks(machine, tmp_path):
@@ -320,7 +320,6 @@ def test_an_install_with_no_git_says_so_rather_than_crash_reaching_a_profile(mon
     return subprocess.CompletedProcess(argv, 0, "", "")
   monkeypatch.setattr(install.shutil, "which", lambda tool: None if tool == "git" else f"/usr/bin/{tool}")
   monkeypatch.setattr(install.subprocess, "run", no_git)
-  monkeypatch.setattr(install._profile.subprocess, "run", no_git)
   assert any(problem.startswith("missing git") for problem in install.preflight("git@github.com:someone/.agents.profile.git"))
 
 
@@ -349,7 +348,7 @@ def test_a_commit_runs_the_repos_own_hook_first_and_is_reviewed_only_where_a_not
   (home / ".agents" / "hooks").mkdir(parents=True)
   (home / ".agents" / "hooks" / "post-commit.sh").write_text(f"#!/usr/bin/env bash\necho reviewed >> {tmp_path}/marks\n")   # where the real review would start, so no model is called
   (home / ".agents" / "hooks" / "post-commit.sh").chmod(0o755)
-  (home / ".agents" / "hooks" / "log.sh").symlink_to(install.SHIPPED / "hooks" / "log.sh")   # the real logger, into this HOME
+  (home / ".agents" / "hooks" / "log.sh").symlink_to(install.BUNDLED / "hooks" / "log.sh")   # the real logger, into this HOME
   repo = git(tmp_path / "repo")
 
   assert commit(repo) == []

@@ -11,7 +11,7 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-from agentkit import notes, profile as _profile
+from agentkit import hub, notes, profile as _profile
 from agentkit.frontmatter import load
 
 LINKS = "agents.toml"
@@ -221,7 +221,7 @@ def init(target: Path) -> dict:
   agents_dir.mkdir(parents=True, exist_ok=True)
 
   added = []
-  for template in sorted((_profile.TEMPLATES / "agents").iterdir()):
+  for template in sorted((hub.TEMPLATES / "agents").iterdir()):
     file, text = agents_dir / template.name, template.read_text(encoding="utf-8").replace("{name}", target.name)
     if not file.exists(): file.write_text(text, encoding="utf-8")
     elif template.name == ".gitignore" and (have := file.read_text(encoding="utf-8").splitlines()) is not None and (lacking := [line for line in text.splitlines() if line not in have]):   # read once, not once per line

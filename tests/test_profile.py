@@ -14,14 +14,14 @@ from pathlib import Path
 import pytest
 from conftest import agent
 
-from agentkit import agents, backends, cli, doctor, install, profile
+from agentkit import agents, backends, cli, doctor, git, hub, install, profile
 from agentkit.standards import Library
 
 
 @pytest.fixture
 def isolated(tmp_path, monkeypatch):
   """Every path the profile code writes to, moved somewhere it can do no harm."""
-  monkeypatch.setattr(profile, "LOCAL", tmp_path / "local.toml")
+  monkeypatch.setattr(hub, "LOCAL", tmp_path / "local.toml")
   monkeypatch.setattr(profile, "DEFAULT", tmp_path / "hub" / "profile")
   monkeypatch.delenv("AGENTS_PROFILE", raising=False)
   monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
@@ -31,31 +31,31 @@ def isolated(tmp_path, monkeypatch):
 
 def commit(repository: Path, message: str) -> None:
   """An empty commit: history is all these tests need."""
-  profile.git(repository, "commit", "--allow-empty", "-qm", message)
+  git.run(repository, "commit", "--allow-empty", "-qm", message)
 
 
 def published(parent: Path, name: str) -> tuple[Path, Path]:
   """A bare remote and a clone of it with one commit pushed: what a profile on GitHub looks like."""
   bare, clone = parent / f"{name}.git", parent / name
-  profile.git(parent, "init", "-q", "--bare", "-b", "main", str(bare))
-  profile.git(parent, "clone", "-q", str(bare), str(clone))
+  git.run(parent, "init", "-q", "--bare", "-b", "main", str(bare))
+  git.run(parent, "clone", "-q", str(bare), str(clone))
   commit(clone, "first")
-  profile.git(clone, "push", "-q", "-u", "origin", "main")
+  git.run(clone, "push", "-q", "-u", "origin", "main")
   return bare, clone
 
 
 def test_the_profile_is_found_from_the_environment_then_local_toml_then_the_default(isolated, monkeypatch):
   """The environment wins over local.toml, which wins over the default; empty means none, and a broken local.toml is none."""
-  profile.LOCAL.write_text("[profile\npath = ")
+  hub.LOCAL.write_text("[profile\npath = ")
   assert profile.path() is None
   for wrong in ('profile = "/saved"\n', "[profile]\npath = 3\n"):   # parses, but is not a [profile] table with a path
-    profile.LOCAL.write_text(wrong)
+    hub.LOCAL.write_text(wrong)
     assert profile.chosen() is None and profile.path() is None
 
   profile.DEFAULT.mkdir(parents=True)
   assert profile.path() == profile.DEFAULT
 
-  profile.LOCAL.write_text('[profile]\npath = "/saved"\n')
+  hub.LOCAL.write_text('[profile]\npath = "/saved"\n')
   assert profile.path() == Path("/saved")
 
   for value, expected in ((str(isolated / "env"), isolated / "env"), ("", None)):
@@ -66,34 +66,34 @@ def test_the_profile_is_found_from_the_environment_then_local_toml_then_the_defa
 @pytest.mark.parametrize("before", ['# mine\n[profile]\npath = "/old"\nnote = "keep"\n\n[mine]\nkept = true\n', '[profile]  # mine\n  path = "/old"\nnote = "keep"\n', '[mine]\nkept = true\n', ""])
 def test_saving_rewrites_only_the_path(isolated, before):
   """Save changes the `path` line and keeps the file's other tables, keys and comments, whatever characters the path holds."""
-  if before: profile.LOCAL.write_text(before)
+  if before: hub.LOCAL.write_text(before)
   saved = isolated / 'odd "quoted" \\ dir'
   saved.mkdir()
   profile.save(saved)
 
   expected = {**(old := tomllib.loads(before)), "profile": {**old.get("profile", {}), "path": str(saved.resolve())}}
-  text = profile.LOCAL.read_text()
+  text = hub.LOCAL.read_text()
   assert tomllib.loads(text) == expected
   assert text.startswith(before.split("path")[0].rstrip(" "))
 
 
 def test_a_profile_replaces_the_hubs_standards_reviewers_and_backends_by_name_and_layers_its_config(isolated, monkeypatch):
   """A profile's standard, reviewer and backend replace the hub's of the same name, its own are added, and its config sits between the hub's and the repo's."""
-  hub, mine, repo = isolated / "hub", isolated / "mine", isolated / "repo"
-  for directory, name, body in ((hub, "python", "STARTER"), (mine, "python", "MINE"), (repo, "python", "REPO"), (hub / "agents", "file-review", "HUB"), (mine / "agents", "file-review", "MINE"), (mine / "agents", "my-check", "MINE TOO")):
+  bundled, mine, repo = isolated / "bundled", isolated / "mine", isolated / "repo"
+  for directory, name, body in ((bundled, "python", "STARTER"), (mine, "python", "MINE"), (repo, "python", "REPO"), (bundled / "agents", "file-review", "HUB"), (mine / "agents", "file-review", "MINE"), (mine / "agents", "my-check", "MINE TOO")):
     directory.mkdir(parents=True, exist_ok=True)
     (directory / f"{name}.md").write_text(f"---\nname: {name}\ndescription: {name}\napplies: *.py\nkind: logic\n---\n\n{body}\n")
-  assert [(layer.origin, layer.doc.body.strip()) for layer in Library(hub, [repo], profile=mine).layers["python"]] == [("profile", "MINE"), ("repo", "REPO")]
+  assert [(layer.origin, layer.doc.body.strip()) for layer in Library(bundled, [repo], profile=mine).layers["python"]] == [("profile", "MINE"), ("repo", "REPO")]
 
-  monkeypatch.setattr(agents, "AGENTS", hub / "agents")
+  monkeypatch.setattr(agents, "AGENTS", bundled / "agents")
   monkeypatch.setenv("AGENTS_PROFILE", str(mine))
-  definitions = agents.definitions(hub / "agents")
+  definitions = agents.definitions(bundled / "agents")
   assert sorted(definitions) == ["file-review", "my-check"]
   assert agents.definition("file-review", definitions).body.strip() == "MINE"
 
-  (hub / "config.toml").write_text('[review]\nexclude = ["**/vendor/**"]\njobs = 4\n[backends]\ndefault = "claude"\n[backends.claude]\nkind = "cli"\nargv = ["claude"]\nmodels = { text = "hub-model" }\n[backends.ollama]\nkind = "http"\nurl = "x"\n')
+  (bundled / "config.toml").write_text('[review]\nexclude = ["**/vendor/**"]\njobs = 4\n[backends]\ndefault = "claude"\n[backends.claude]\nkind = "cli"\nargv = ["claude"]\nmodels = { text = "hub-model" }\n[backends.ollama]\nkind = "http"\nurl = "x"\n')
   (mine / "config.toml").write_text('[review]\nexclude = "**/data/**"\njobs = 2\n[backends]\ndefault = "ollama"\n[backends.claude]\nkind = "cli"\nargv = ["claude"]\nmodels = { text = "my-model" }\n')
-  monkeypatch.setattr(profile, "CONFIG", hub / "config.toml")
+  monkeypatch.setattr(hub, "CONFIG", bundled / "config.toml")
   known, default = backends.load_backends()
   assert default == "ollama" and set(known) == {"claude", "ollama"}
   assert known["claude"].spec["models"]["text"] == "my-model"
@@ -153,19 +153,19 @@ def test_a_profile_is_adopted_checked_for_drift_updated_and_made(isolated, monke
   commit(clone, "second")
   (clone / "voice.md").write_text("new\n")
   assert profile.drift(clone) == ["1 uncommitted change", "1 commit not pushed"]
-  profile.git(clone, "update-ref", "-d", "refs/remotes/origin/main")   # an upstream set but not fetched is not no upstream
+  git.run(clone, "update-ref", "-d", "refs/remotes/origin/main")   # an upstream set but not fetched is not no upstream
   assert profile.drift(clone) == ["1 uncommitted change", "its upstream origin/main is gone, or was never fetched"]
 
-  monkeypatch.setattr(profile, "SHIPPED", published(isolated, "agents")[1])
-  profile.git(clone, "push", "-q")
+  monkeypatch.setattr(hub, "BUNDLED", published(isolated, "agents")[1])
+  git.run(clone, "push", "-q")
   assert cli.setup.cmd_update(argparse.Namespace()) == 0
-  assert profile.git(profile.DEFAULT, "log", "-1", "--format=%s").stdout == "second\n"
+  assert git.run(profile.DEFAULT, "log", "-1", "--format=%s").stdout == "second\n"
   said = capsys.readouterr().out
   assert ".agents: already current" in said and "profile: pulled 1 commit  (" in said
 
   commit(profile.DEFAULT, "here")
   commit(clone, "there")
-  profile.git(clone, "push", "-q")
+  git.run(clone, "push", "-q")
   assert cli.setup.cmd_update(argparse.Namespace()) == 1
   assert "FAIL" in capsys.readouterr().out
 
@@ -180,7 +180,7 @@ def test_a_profile_is_adopted_checked_for_drift_updated_and_made(isolated, monke
 def test_doctor_fails_a_public_profile_remote_and_profile_names_a_missing_one(isolated, monkeypatch):
   """doctor asks gh whether a profile's GitHub remote is private and fails it when public; `agent profile` says when there is no remote at all."""
   mine, fake = isolated / "mine", isolated / "fake"
-  profile.git(isolated, "init", "-q", "-b", "main", str(mine))
+  git.run(isolated, "init", "-q", "-b", "main", str(mine))
   monkeypatch.setenv("AGENTS_PROFILE", str(mine))
   monkeypatch.chdir(isolated)
   said = agent(["profile"], cwd=isolated).stdout
@@ -191,7 +191,7 @@ def test_doctor_fails_a_public_profile_remote_and_profile_names_a_missing_one(is
   (fake / "gh").chmod(0o755)
   monkeypatch.setenv("PATH", f"{fake}{os.pathsep}{os.environ['PATH']}")
   monkeypatch.setenv("GH_LOG", str(isolated / "gh.log"))
-  profile.git(mine, "remote", "add", "origin", "git@github.com:someone/.agents.profile.git")
+  git.run(mine, "remote", "add", "origin", "git@github.com:someone/.agents.profile.git")
   assert "no remote" not in agent(["profile"], cwd=isolated).stdout
   for private in ("true", "false"):
     monkeypatch.setenv("GH_PRIVATE", private)

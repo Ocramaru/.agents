@@ -5,7 +5,6 @@ Where it lives is this machine's, in the gitignored `local.toml`, which also tak
 Author: Marco Cassar (@Ocramaru)
 """
 
-import importlib.metadata
 import json
 import os
 import re
@@ -14,20 +13,9 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-PACKAGE = Path(__file__).resolve().parent
-INSTALLED = (PACKAGE / "shipped").is_dir()   # a wheel carries the hub's files inside the package; a checkout has them beside it
-SHIPPED = PACKAGE / "shipped" if INSTALLED else PACKAGE.parent   # standards, agents, templates and hooks as released, replaced by an upgrade
-HOME = Path.home() / ".agents" if INSTALLED else PACKAGE.parent   # this machine's state and the hooks at their fixed paths; a clone is its own
-CONFIG = SHIPPED / "config.toml"   # what ships, and so every key's default
-LOCAL = HOME / "local.toml"
-TEMPLATES = SHIPPED / "templates"   # what `agent init` and `agent profile init` write, one folder each
-DEFAULT = HOME / "profile"
+from agentkit import git, hub
 
-
-def source() -> dict:
-  """Where uv installed agentkit from, as its direct_url.json records it: a `url`, with `vcs_info` for a git source; empty from an index."""
-  try: return json.loads(importlib.metadata.distribution("agentkit").read_text("direct_url.json") or "{}")
-  except (importlib.metadata.PackageNotFoundError, ValueError): return {}
+DEFAULT = hub.HOME / "profile"   # where a profile is made or cloned when none is named
 
 
 def path() -> Path | None:
@@ -40,7 +28,7 @@ def path() -> Path | None:
 
 def chosen() -> str | None:
   """The profile this machine's local.toml records: a path, `""` for a choice of none, or None when it records no choice."""
-  try: local = tomllib.loads(LOCAL.read_text(encoding="utf-8")) if LOCAL.is_file() else {}
+  try: local = tomllib.loads(hub.LOCAL.read_text(encoding="utf-8")) if hub.LOCAL.is_file() else {}
   except tomllib.TOMLDecodeError: local = {}      # a broken local file is no profile, not a crash
   return saved if isinstance(table := local.get("profile"), dict) and isinstance(saved := table.get("path"), str) else None   # nor is one of the wrong shape
 
@@ -55,7 +43,7 @@ def section(name: str, repo: Path | None = None, add: tuple[str, ...] = ()) -> d
   """One config section: the hub's config.toml, the profile's, this machine's local.toml, then `repo`'s .agents/agents.toml and its .local/agents.toml, each key replacing the last except those in `add`, which accumulate.
   `AGENTS_PROFILE=""` leaves out the profile and local.toml, so a test reads only the config it is given."""
   settings: dict = {}
-  for layer in (CONFIG, file("config.toml"), None if os.environ.get("AGENTS_PROFILE") == "" else LOCAL, *((Path(repo) / ".agents" / "agents.toml", Path(repo) / ".agents" / ".local" / "agents.toml") if repo else ())):
+  for layer in (hub.CONFIG, file("config.toml"), None if os.environ.get("AGENTS_PROFILE") == "" else hub.LOCAL, *((Path(repo) / ".agents" / "agents.toml", Path(repo) / ".agents" / ".local" / "agents.toml") if repo else ())):
     if not layer or not layer.is_file(): continue
     for key, value in tomllib.loads(layer.read_text(encoding="utf-8")).get(name, {}).items(): settings[key] = settings.get(key, []) + ([value] if isinstance(value, str) else value) if key in add else value   # a lone string is a list of one
   return settings
@@ -63,7 +51,7 @@ def section(name: str, repo: Path | None = None, add: tuple[str, ...] = ()) -> d
 
 def save(where: Path | None) -> None:
   """Record this machine's profile, or an empty path for none."""
-  write(LOCAL, "profile", "path", str(Path(where).expanduser().resolve()) if where else "")
+  write(hub.LOCAL, "profile", "path", str(Path(where).expanduser().resolve()) if where else "")
 
 
 def write(file: Path, table: str, key: str, value: str) -> None:
@@ -72,7 +60,7 @@ def write(file: Path, table: str, key: str, value: str) -> None:
   JSON's string escaping is TOML's, so any value is quoted validly.
   """
   line = f"{key} = {json.dumps(value)}"
-  text = file.read_text(encoding="utf-8") if file.is_file() else HEADER if file == LOCAL else ""
+  text = file.read_text(encoding="utf-8") if file.is_file() else HEADER if file == hub.LOCAL else ""
   if text and not text.endswith("\n"): text += "\n"   # a header on the last line is still a header
   found = re.search(rf"(?ms)^\[{re.escape(table)}\][ \t]*(?:#[^\n]*)?\n(.*?)(?=^\[|\Z)", text)
 
@@ -107,7 +95,7 @@ def adopt(source: str) -> tuple[int, str]:
     return 0, f"set   profile -> {where}"
 
   if DEFAULT.exists():
-    origin = git(DEFAULT, "remote", "get-url", "origin").stdout.strip()
+    origin = git.run(DEFAULT, "remote", "get-url", "origin").stdout.strip()
     if origin != source: return 1, f"{DEFAULT} already holds {origin or 'something else'}, not {source}"
     save(DEFAULT)
     return 0, f"ok    profile -> {DEFAULT} ({source})"
@@ -123,18 +111,13 @@ def remote(source: str) -> bool:
   return "://" in source or source.endswith(".git") or (":" in source and "@" in source.split(":")[0])
 
 
-def git(where: Path, *args: str) -> subprocess.CompletedProcess:
-  """Run git in `where`, never raising."""
-  return subprocess.run(["git", "-C", str(where), *args], capture_output=True, text=True, check=False)
-
-
 def drift(where: Path) -> list[str]:
   """What would leave another machine without the profile's latest: uncommitted, unpushed, or behind.
 
   Behind is as of the last fetch, since doctor does not fetch.
   """
   if not (where / ".git").exists(): return []
-  if (status := git(where, "status", "--porcelain=v2", "--branch")).returncode: return [f"git status failed: {status.stderr.strip().partition('\n')[0]}"]
+  if (status := git.run(where, "status", "--porcelain=v2", "--branch")).returncode: return [f"git status failed: {status.stderr.strip().partition('\n')[0]}"]
   branch = dict(line[2:].split(" ", 1) for line in status.stdout.splitlines() if line.startswith("# "))   # its headers, which git never translates
   out = []
   dirty = len(status.stdout.splitlines()) - len(branch)
@@ -155,7 +138,7 @@ def init(where: Path) -> list[str]:
     (where / "standards").mkdir(parents=True)
     made.append("standards/")
 
-  for template in sorted((TEMPLATES / "profile").iterdir()):
+  for template in sorted((hub.TEMPLATES / "profile").iterdir()):
     if not (where / template.name).exists():
       shutil.copy(template, where / template.name)
       made.append(template.name)
@@ -163,5 +146,5 @@ def init(where: Path) -> list[str]:
   # nested in the .agents clone is fine, .agents ignores it; and .git only if init worked
   if not (where / ".git").exists() and subprocess.run(["git", "init", "-q", "-b", "main", str(where)], check=False).returncode == 0:
     made.append(".git")
-    if git(where, "add", "-A").returncode == 0 and git(where, "commit", "-qm", "Start a profile").returncode == 0: made.append("a first commit, so it can be pushed")
+    if git.run(where, "add", "-A").returncode == 0 and git.run(where, "commit", "-qm", "Start a profile").returncode == 0: made.append("a first commit, so it can be pushed")
   return made

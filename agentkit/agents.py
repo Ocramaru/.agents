@@ -6,11 +6,11 @@ Author: Marco Cassar (@Ocramaru)
 import subprocess
 from pathlib import Path
 
-from agentkit import notes, profile as _profile, tree
+from agentkit import hub, notes, profile as _profile, tree
 from agentkit.frontmatter import Doc, load
 from agentkit.standards import Library
 
-AGENTS = _profile.SHIPPED / "agents"
+AGENTS = hub.BUNDLED / "agents"
 
 
 def definitions(root: Path = AGENTS) -> dict[str, Doc]:

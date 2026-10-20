@@ -9,10 +9,10 @@ import fnmatch
 import functools
 from pathlib import Path
 
-from agentkit import profile as _profile
+from agentkit import hub, profile as _profile
 from agentkit.frontmatter import Doc, load
 
-GLOBAL = _profile.SHIPPED / "standards"
+GLOBAL = hub.BUNDLED / "standards"
 AUTO = object()   # the profile goes with the bundled set, and with nothing else
 
 

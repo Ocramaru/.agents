@@ -8,12 +8,12 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from agentkit import agents, backends, hooks, inject, install, notes, profile as _profile, reviews, tree, version
+from agentkit import agents, backends, git, hooks, hub, inject, install, notes, profile as _profile, reviews, tree, version
 
 
 def release() -> list[tuple[str, str]]:
   """The version, and whether this is a clone to work on or an install to upgrade."""
-  return [("agentkit", f"{version()}, an install at {_profile.SHIPPED}, its state in {_profile.HOME}" if _profile.INSTALLED else f"{version()}, a clone at {_profile.SHIPPED}")]
+  return [("agentkit", f"{version()}, an install at {hub.BUNDLED}, its state in {hub.HOME}" if hub.INSTALLED else f"{version()}, a clone at {hub.BUNDLED}")]
 
 
 def profile() -> list[tuple[str, str]]:
@@ -22,7 +22,7 @@ def profile() -> list[tuple[str, str]]:
   if where is None: return [("profile", "none, so the starters in .agents are in use")]
   if not where.is_dir(): return [("profile", f"{where}, which does not exist")]
 
-  origin = _profile.git(where, "remote", "get-url", "origin").stdout.strip()
+  origin = git.run(where, "remote", "get-url", "origin").stdout.strip()
   return [("profile", str(where)), ("profile", f"remote {origin}" if origin else "no remote, so no other machine gets it"),
           *(("profile", problem) for problem in _profile.drift(where) or ["nothing unpushed" if (where / ".git").exists() else "not a git repo"])]
 
@@ -58,14 +58,14 @@ def findings() -> list[tuple[str, str]]:
 
 
 def claude() -> list[tuple[str, str]]:
-  """Whether Claude Code's settings.json holds the hooks block exactly as shipped."""
+  """Whether Claude Code's settings.json holds the hooks block exactly as agentkit bundles it."""
   settings = install.config_dir("claude") / "settings.json"
   if not settings.is_file(): return [("claude hooks", f"not in place: there is no {settings}")]
   try: live = json.loads(settings.read_text(encoding="utf-8"))
   except ValueError as error: return [("claude hooks", f"unknown: {settings} is not valid JSON, {error}")]
 
   block = live.get("hooks") if isinstance(live, dict) else None
-  return [("claude hooks", f"{'in place' if block == json.loads((_profile.SHIPPED / 'settings.hooks.json').read_text(encoding='utf-8')) else 'not in place' if block is None else 'a block other than the one shipped'} in {settings}")]
+  return [("claude hooks", f"{'in place' if block == json.loads((hub.BUNDLED / 'settings.hooks.json').read_text(encoding='utf-8')) else 'not in place' if block is None else 'a block other than the one agentkit bundles'} in {settings}")]
 
 
 def githooks() -> list[tuple[str, str]]:

@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from agentkit import profile
+from agentkit import git, hub
 
 LOG = Path(os.environ.get("AGENTS_HOOK_LOG") or Path.home() / ".agents" / ".hooks.log")   # hooks/log.sh reads the same variable
 
@@ -43,10 +43,10 @@ def entries(session: str = "", log: Path = LOG, verbose: bool = False, hook: str
 def errors() -> list[list[str]]:
   """Errors logged since .agents last changed, its last commit in a clone and the install itself in an install, as `entries` rows, oldest first.
   A crash logged before then came from code this machine has since replaced."""
-  if profile.INSTALLED:   # each install writes its own RECORD, while the package's files may be links into uv's cache
+  if hub.INSTALLED:   # each install writes its own RECORD, while the package's files may be links into uv's cache
     record = next((Path(file.locate()) for file in importlib.metadata.distribution("agentkit").files or [] if file.name == "RECORD"), None)
     since = datetime.fromtimestamp(record.stat().st_mtime).astimezone() if record and record.is_file() else datetime.fromisoformat("1970-01-01T00:00:00+00:00")   # no RECORD is a broken install, which still gets a doctor
-  else: since = datetime.fromisoformat(profile.git(profile.SHIPPED, "log", "-1", "--format=%cI").stdout.strip() or "1970-01-01T00:00:00+00:00")
+  else: since = datetime.fromisoformat(git.run(hub.BUNDLED, "log", "-1", "--format=%cI").stdout.strip() or "1970-01-01T00:00:00+00:00")
   return [row for row in entries() if row[3].startswith("ERROR") and datetime.fromisoformat(row[0]) > since]
 
 

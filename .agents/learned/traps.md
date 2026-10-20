@@ -16,7 +16,7 @@ kind: learned
 
 - **A test helper that ignores git's exit code can make a test vacuous.** The update test published its hub into a directory that already held the profile; `git clone` failed, nothing said so, and update's pull of the hub went untested for as long as the test existed. Assert on what a helper was meant to make.
 
-- **An editable install copies every `force-include`d file into the venv.** hatchling writes `agentkit/shipped/` into `.venv`'s site-packages beside the `.pth`, and nothing reads it: the checkout's package is the one imported, and `profile.INSTALLED` looks only beside it. `sources` cannot stand in, since it rewrites directory prefixes and not `AGENTS.md` or `config.toml`.
+- **An editable install copies every `force-include`d file into the venv.** hatchling writes `agentkit/bundled/` into `.venv`'s site-packages beside the `.pth`, and nothing reads it: the checkout's package is the one imported, and `hub.INSTALLED` looks only beside it. `sources` cannot stand in, since it rewrites directory prefixes and not `AGENTS.md` or `config.toml`.
 
 - **`git ls-files` lists only tracked files.** `agent sub review` on a directory of new, not-yet-added files found nothing while an explicit `.py` path routed, in a repo whose package had never been committed. Discovery lists `--cached --others --exclude-standard`: new files count, `.gitignore` still holds.
 

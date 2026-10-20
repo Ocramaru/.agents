@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agentkit import backends, doctor, guard, hooks, install, issue, profile, reviews, status, tree, version
+from agentkit import backends, doctor, git, guard, hooks, hub, install, issue, profile, reviews, status, tree, version
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli.out import done, escape, fail, line, note, report, table
 
@@ -76,12 +76,12 @@ def cmd_install(args) -> int:
   done(*lines)
   if code: return code
 
-  if answer == "new" and not profile.git(profile.DEFAULT, "remote").stdout.strip():   # a profile reaches other machines only once pushed
+  if answer == "new" and not git.run(profile.DEFAULT, "remote").stdout.strip():   # a profile reaches other machines only once pushed
     login = issue.login()
     if login and sys.stdin.isatty() and ask(f"\nMake {login}/.agents.profile on GitHub, private, and push your profile there? [y/N] ").lower() in ("y", "yes"):   # it publishes, so it asks
       made = issue.gh("repo", "create", f"{login}/.agents.profile", "--private", "--source", str(profile.DEFAULT), "--remote", "origin", "--push")
       line(f"  made  {login}/.agents.profile, private, and pushed" if made.returncode == 0 else f"  FAIL  {(made.stderr.strip().splitlines() or ['gh said nothing'])[-1]}")
-    if not profile.git(profile.DEFAULT, "remote").stdout.strip():
+    if not git.run(profile.DEFAULT, "remote").stdout.strip():
       done("", "Push your profile somewhere private, so your other machines get it:", f"  git -C {profile.DEFAULT} remote add origin git@github.com:{login or '<you>'}/.agents.profile.git", f"  git -C {profile.DEFAULT} push -u origin main")
 
   if args.backend: done("", "backend", f"  set   default = {args.backend} in {install.home(backends.choose(args.backend))}")
@@ -165,7 +165,7 @@ def cmd_update(args) -> int:
   """Pull the latest hub, through uv for an install and git for a clone, and the latest profile, saying what each moved.
   A pull that would have to merge stops and says so instead."""
   bad, was = 0, version()
-  if profile.INSTALLED:   # uv replaces the package, and the new one copies its own hooks into ~/.agents
+  if hub.INSTALLED:   # uv replaces the package, and the new one copies its own hooks into ~/.agents
     try: upgraded = subprocess.run(["uv", "tool", "upgrade", "agentkit"], capture_output=True, check=False, text=True)
     except FileNotFoundError: upgraded = subprocess.CompletedProcess(["uv"], 127, "", "uv is not on PATH")
     bad += upgraded.returncode != 0
@@ -176,21 +176,21 @@ def cmd_update(args) -> int:
       bad += copied.returncode != 0
       done(f"ok     .agents: upgraded {was} -> {now}" if copied.returncode == 0 else f"FAIL   .agents: upgraded {was} -> {now}, but its install did not finish; run `agent install`", *(f"       {said.strip()}" for said in copied.stdout.splitlines() if (said.split() or [""])[0] in ("copy", "wrote", "link", "point", "saved", "cannot")))
 
-  for name, where in ((".agents", None if profile.INSTALLED else profile.SHIPPED), ("profile", profile.path())):
+  for name, where in ((".agents", None if hub.INSTALLED else hub.BUNDLED), ("profile", profile.path())):
     if name == ".agents" and where is None: continue
     if where is None or not (where / ".git").exists():
       line(f"skip   {name}: {'not a git repo' if where else 'none set'}")
       continue
 
-    before = profile.git(where, "rev-parse", "HEAD").stdout.strip()
-    pulled = profile.git(where, "pull", "--ff-only", "-q")
+    before = git.run(where, "rev-parse", "HEAD").stdout.strip()
+    pulled = git.run(where, "pull", "--ff-only", "-q")
     bad += pulled.returncode != 0
     if pulled.returncode: line(f"FAIL   {name}: {((pulled.stderr or pulled.stdout).strip().splitlines() or ['git said nothing'])[-1]}  ({where})")
     else:
-      count = int(profile.git(where, "rev-list", "--count", f"{before}..HEAD" if before else "HEAD").stdout.strip() or 0)
+      count = int(git.run(where, "rev-list", "--count", f"{before}..HEAD" if before else "HEAD").stdout.strip() or 0)
       line(f"ok     {name}: {f'pulled {count} commit' + ('s' if count != 1 else '') if count else 'already current'}  ({where})")
 
-  if not profile.INSTALLED and (now := version()) != was: line(f"       agentkit {was} -> {now}")
+  if not hub.INSTALLED and (now := version()) != was: line(f"       agentkit {was} -> {now}")
   return 1 if bad else 0
 
 
@@ -204,7 +204,7 @@ def cmd_profile_status(args) -> int:
     return done("no profile: the starters in .agents are in use.", "  make one:  agent profile init ~/.agents/profile",
                 "  or clone:  agent install --profile <url>")
 
-  origin = profile.git(where, "remote", "get-url", "origin").stdout.strip()
+  origin = git.run(where, "remote", "get-url", "origin").stdout.strip()
   return done(f"profile  {where}" + (f"  ({origin})" if origin else ""),
               *(f"  {part:<14} {len(list(path.glob('*.md')))} file(s)" if path.is_dir() else f"  {part}" for part, path in [(part, where / part) for part in ("standards", "agents", "config.toml", "AGENTS.md")] if path.exists()),
               *([] if origin else [f"  !  no remote, so no other machine gets it: git -C {where} remote add origin <a private repo>, then push"]),

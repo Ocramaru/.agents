@@ -18,7 +18,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from agentkit import profile as _profile
+from agentkit import hub, profile as _profile
 
 PLACEHOLDER = re.compile(r"\{(model|prompt|session|effort)\}")
 
@@ -181,6 +181,6 @@ def get(name: str | None = None) -> Backend:
 
 def choose(name: str) -> Path:
   """Make `name` the default backend: in the profile's config.toml, or this machine's local.toml when there is no profile. Returns the file written."""
-  where = root / "config.toml" if (root := _profile.path()) else _profile.LOCAL
+  where = root / "config.toml" if (root := _profile.path()) else hub.LOCAL
   _profile.write(where, "backends", "default", name)
   return where

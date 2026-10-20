@@ -8,7 +8,7 @@ from pathlib import Path
 
 from conftest import git, note, standard
 
-from agentkit import inject, notes, profile, tree
+from agentkit import hub, inject, notes, profile, tree
 
 
 def local(repo: Path, text: str, name: str = "context") -> Path:
@@ -38,7 +38,7 @@ def test_a_local_does_not_demote_its_agents_from_nearest(repo, tmp_path, monkeyp
   (mine := tmp_path / "profile").mkdir()
   (mine / "config.toml").write_text('[inject]\nnearest = "full"\nancestors = "context"\n')
   monkeypatch.setenv("AGENTS_PROFILE", str(mine))
-  monkeypatch.setattr(profile, "LOCAL", tmp_path / "local.toml")   # never this machine's
+  monkeypatch.setattr(hub, "LOCAL", tmp_path / "local.toml")   # never this machine's
   note(repo, "# L\n\nNEAR-FINDING", "learned")
   local(repo, "LOCAL-RULE")
   local(repo, "# L\n\nLOCAL-FINDING", "learned")

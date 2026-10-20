@@ -12,9 +12,8 @@ import shutil
 import tomllib
 from pathlib import Path
 
-from agentkit import agents, backends, guard, hooks, inject, install, issue, mapblock, notes, profile, tree
+from agentkit import agents, backends, git, guard, hooks, hub, inject, install, issue, mapblock, notes, profile, tree
 from agentkit.frontmatter import load
-from agentkit.profile import HOME, SHIPPED
 from agentkit.standards import Library
 MODES = ("full", "context", "none")   # what agents.toml `inject` may say
 
@@ -24,10 +23,10 @@ def checks() -> list[tuple[bool, str, str]]:
   out = []
 
   found = shutil.which("agent")
-  out.append((bool(found and Path(found).resolve() == install.CLI.resolve()), f"`agent` on PATH -> {found or 'not found'}", "`uv tool update-shell` puts uv's bin on PATH; the hooks call the first `agent` there" if profile.INSTALLED else "run `agent install`, and put ~/.local/bin on PATH"))
-  if profile.INSTALLED: out.append((not (stale := install.stale()), f"hooks, githooks, commands and AGENTS.md in {HOME} match this install", f"{len(stale)} missing or changed, {stale[0].relative_to(SHIPPED)} among them; run `agent install`" if stale else ""))
+  out.append((bool(found and Path(found).resolve() == install.CLI.resolve()), f"`agent` on PATH -> {found or 'not found'}", "`uv tool update-shell` puts uv's bin on PATH; the hooks call the first `agent` there" if hub.INSTALLED else "run `agent install`, and put ~/.local/bin on PATH"))
+  if hub.INSTALLED: out.append((not (stale := install.stale()), f"hooks, githooks, commands and AGENTS.md in {hub.HOME} match this install", f"{len(stale)} missing or changed, {stale[0].relative_to(hub.BUNDLED)} among them; run `agent install`" if stale else ""))
 
-  ours = SHIPPED / "settings.hooks.json"
+  ours = hub.BUNDLED / "settings.hooks.json"
   settings = install.config_dir("claude") / "settings.json"
   try:   # a hand-edited settings.json may not parse, which is a finding, not a crash
     wanted = json.loads(ours.read_text(encoding="utf-8")) if ours.is_file() else None
@@ -36,9 +35,9 @@ def checks() -> list[tuple[bool, str, str]]:
   except json.JSONDecodeError as error: wanted, live, fix = None, None, f"not valid JSON: {error}"
   out.append((wanted is not None and live == wanted, f"hooks block in {settings.name} matches settings.hooks.json", fix))
 
-  for hook in sorted((HOME / "hooks").glob("*.sh")): out.append((os.access(hook, os.X_OK), f"{hook.name} is executable", f"chmod +x {hook}"))
+  for hook in sorted((hub.HOME / "hooks").glob("*.sh")): out.append((os.access(hook, os.X_OK), f"{hook.name} is executable", f"chmod +x {hook}"))
 
-  commands = sorted((HOME / "commands").glob("*.md"))
+  commands = sorted((hub.HOME / "commands").glob("*.md"))
   for target, subdirectory in install.COMMANDS.items():
     directory = install.config_dir(target) / subdirectory
     if not directory.parent.is_dir(): continue
@@ -50,7 +49,7 @@ def checks() -> list[tuple[bool, str, str]]:
       for reference in standard.list(field): out.append((reference in library.layers, f"standard {name} {field} {reference}", f"{reference} does not exist; fix the {field} in {standard.path.name}"))
     out.append((bool(standard.get("description")), f"standard {name} has a description", "add one; it is what shows when the body is not loaded"))
 
-  for definition_file in sorted((SHIPPED / "agents").glob("*.md")):
+  for definition_file in sorted((hub.BUNDLED / "agents").glob("*.md")):
     definition = load(definition_file)
     for reference in definition.list("standards"): out.append((reference in library.layers, f"agent {definition.name} judges against {reference}", f"{reference} does not exist; fix the standards list in {definition_file.name}"))
 
@@ -59,7 +58,7 @@ def checks() -> list[tuple[bool, str, str]]:
 
   # a hand-edited config that does not parse is reported, and every check below waits until it does
   broken, root = [], tree.git_root(here)
-  for file in dict.fromkeys(path for path in [profile.CONFIG, profile.file("config.toml"), profile.LOCAL, *(directory / tree.LINKS for directory in [*note_dirs, *((root / ".agents", root / ".agents" / ".local") if root else ())])] if path and path.is_file()):
+  for file in dict.fromkeys(path for path in [hub.CONFIG, profile.file("config.toml"), hub.LOCAL, *(directory / tree.LINKS for directory in [*note_dirs, *((root / ".agents", root / ".agents" / ".local") if root else ())])] if path and path.is_file()):
     try: tomllib.loads(file.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as error: broken.append((False, f"{file} parses as TOML", f"fix it: {error}"))
   if broken: return out + broken
@@ -101,7 +100,7 @@ def checks() -> list[tuple[bool, str, str]]:
     for problem in profile.drift(where) if where.is_dir() else []: out.append((False, f"profile: {problem}", "agent update" if "behind" in problem else f"commit and push in {where}, or your other machines miss it"))
 
     # a profile holds how you work and your models, so its repo is private; gh can say so only for GitHub
-    origin = profile.git(where, "remote", "get-url", "origin").stdout.strip() if where.is_dir() else ""
+    origin = git.run(where, "remote", "get-url", "origin").stdout.strip() if where.is_dir() else ""
     if "github.com" in origin and (repository := issue.named(origin)) and (seen := issue.gh("repo", "view", repository, "--json", "isPrivate", "--jq", ".isPrivate")).returncode == 0:
       out.append((seen.stdout.strip() == "true", f"profile remote {repository} is private", f"it is public, and a profile holds how you work and your models: gh repo edit {repository} --visibility private --accept-visibility-change-consequences"))
 

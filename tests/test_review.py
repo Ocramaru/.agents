@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import Stub, findings, git, note, put, standard
 
-from agentkit import agents as ag, backends, cli, profile, review, reviews, session
+from agentkit import agents as ag, backends, cli, hub, review, reviews, session
 from agentkit.backends import Backend, Reply, _fill
 from agentkit.frontmatter import parse
 from agentkit.session import Message, Session
@@ -184,7 +184,7 @@ def test_an_agent_has_one_kind_and_a_model_role_every_backend_declares_and_a_fil
   put(folder, "named.md", text="---\nname: named\nmodel: code-large\n---\n")
   put(folder, "unnamed.md", text="---\nname: unnamed\n---\n")
   put(folder, "config.toml", text='[review]\nmodel = "code"\n')
-  monkeypatch.setattr(profile, "CONFIG", folder / "config.toml")
+  monkeypatch.setattr(hub, "CONFIG", folder / "config.toml")
   assert {name: definition.get("model") for name, definition in ag.definitions(folder).items()} == {"named": "code-large", "unnamed": "code"}   # the default is configuration, not code
 
   monkeypatch.undo()

@@ -12,11 +12,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agentkit import profile as _profile
-from agentkit.profile import HOME, INSTALLED, SHIPPED
+from agentkit import git, hub, profile as _profile
+from agentkit.hub import BUNDLED, HOME, INSTALLED
 
 GITHOOKS = HOME / "githooks"
-CLI = Path(sys.executable).parent / "agent" if INSTALLED else SHIPPED / "bin" / "agent"   # the `agent` this code runs as, and the one hooks should find
+CLI = Path(sys.executable).parent / "agent" if INSTALLED else BUNDLED / "bin" / "agent"   # the `agent` this code runs as, and the one hooks should find
 FIXED = ("AGENTS.md", "commands", "githooks", "hooks")   # what agents and git name by path under ~/.agents, so an install keeps a copy there
 POINTER = "The `.agents/` notes convention, the standards, and how they load:"
 
@@ -55,14 +55,14 @@ def point_at(file: Path) -> list[str]:
 
   The profile's comes last, so how you work refines the convention.
   """
-  hub, mine = f"@{HOME}/AGENTS.md", _profile.file("AGENTS.md")
+  convention, mine = f"@{HOME}/AGENTS.md", _profile.file("AGENTS.md")
   have = file.read_text(encoding="utf-8") if file.is_file() else ""
-  add = ([] if hub in have else [hub]) + ([f"@{mine}"] if mine and f"@{mine}" not in have else [])
+  add = ([] if convention in have else [convention]) + ([f"@{mine}"] if mine and f"@{mine}" not in have else [])
   if not add: return [f"ok    pointer in {home(file)}"]
 
   file.parent.mkdir(parents=True, exist_ok=True)
   separator = "" if not have or have.endswith("\n") else "\n"   # never join the file's last line
-  if hub in add: separator += ("\n" if have.strip() else "") + f"{POINTER}\n\n"
+  if convention in add: separator += ("\n" if have.strip() else "") + f"{POINTER}\n\n"
   with file.open("a", encoding="utf-8") as handle: handle.write(separator + "\n".join(add) + "\n")
   return [f"point {home(file)}" + (" (and your profile)" if mine and f"@{mine}" in add else "")]
 
@@ -91,7 +91,7 @@ def repoint(old: Path | None) -> list[str]:
 
 def hooks(settings: Path) -> list[str]:
   """Replace the hooks block in Claude Code's settings.json whole, leaving every other key as it was."""
-  ours = json.loads((SHIPPED / "settings.hooks.json").read_text(encoding="utf-8"))
+  ours = json.loads((BUNDLED / "settings.hooks.json").read_text(encoding="utf-8"))
   try: data = json.loads(settings.read_text(encoding="utf-8")) if settings.is_file() else {}
   except ValueError: data = None
   if not isinstance(data, dict): return [f"skip  hooks block: {home(settings)} is not a JSON object, so it is left as it is; fix it and run this again"]
@@ -110,10 +110,10 @@ def hooks(settings: Path) -> list[str]:
 
 
 def stale() -> list[Path]:
-  """The shipped files whose copy at its fixed path in ~/.agents is missing or differs; none in a clone, which is its own copy."""
+  """The bundled files whose copy at its fixed path in ~/.agents is missing or differs; none in a clone, which is its own copy."""
   if not INSTALLED: return []
-  return [source for name in FIXED for source in sorted([SHIPPED / name] if (SHIPPED / name).is_file() else (path for path in (SHIPPED / name).rglob("*") if path.is_file()))
-          if not ((copy := HOME / source.relative_to(SHIPPED)).is_file() and copy.read_bytes() == source.read_bytes())]
+  return [source for name in FIXED for source in sorted([BUNDLED / name] if (BUNDLED / name).is_file() else (path for path in (BUNDLED / name).rglob("*") if path.is_file()))
+          if not ((copy := HOME / source.relative_to(BUNDLED)).is_file() and copy.read_bytes() == source.read_bytes())]
 
 
 def preflight(profile: str | None = None) -> list[str]:
@@ -135,7 +135,7 @@ def preflight(profile: str | None = None) -> list[str]:
                     "bin/agent install, or move it aside and bring back its profile/ and local.toml")
 
   # a clone over ssh with no key or an unknown host stops halfway, or waits on a prompt, so ask first and never interactively
-  if profile and "git" not in missing and _profile.remote(profile) and _profile.git(_profile.DEFAULT, "remote", "get-url", "origin").stdout.strip() != profile:   # with no git, the line above says so
+  if profile and "git" not in missing and _profile.remote(profile) and git.run(_profile.DEFAULT, "remote", "get-url", "origin").stdout.strip() != profile:   # with no git, the line above says so
     try: reached = subprocess.run(["git", "ls-remote", profile, "HEAD"], capture_output=True, check=False, text=True, timeout=60, env=os.environ | {"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")})
     except subprocess.TimeoutExpired: reached = subprocess.CompletedProcess([], 1, "", "no answer in 60 seconds")
     if reached.returncode: problems.append(f"cannot reach {profile}: {(reached.stderr.strip().splitlines() or ['git said nothing'])[-1]}. `git ls-remote {profile}` should work first; nothing was changed")
@@ -153,7 +153,7 @@ def keep(profile: str | None = None) -> tuple[int, str]:
   if not (cache and Path(sys.prefix).resolve().is_relative_to(Path(cache).resolve())): return 0, ""   # uvx runs from an environment in uv's cache
   if problems := preflight(profile): return 1, "\n".join(f"cannot install: {problem}" for problem in problems)
 
-  found = _profile.source()   # the next line names it again for uv: git+URL@revision for git, the URL for a file or directory, the name for an index
+  found = hub.source()   # the next line names it again for uv: git+URL@revision for git, the URL for a file or directory, the name for an index
   vcs = found.get("vcs_info", {})
   kept = subprocess.run(["uv", "tool", "install", f"agentkit @ {'git+' if vcs else ''}{found['url']}{'@' + vcs['requested_revision'] if vcs.get('requested_revision') else ''}" if found else "agentkit"], capture_output=True, check=False, text=True)
   if kept.returncode: return 1, f"could not keep agentkit as a uv tool: {(kept.stderr.strip().splitlines() or ['uv said nothing'])[-1]}"
@@ -179,7 +179,7 @@ def run(targets: list[str], create: bool = False, profile: str | None = None) ->
   here = Path.home() / ".agents"
   if INSTALLED:   # rewritten whenever they differ, so an upgrade carries its hooks
     for source in (copies := stale()):
-      copy = HOME / source.relative_to(SHIPPED)
+      copy = HOME / source.relative_to(BUNDLED)
       copy.parent.mkdir(parents=True, exist_ok=True)
       shutil.copy(source, copy)
     lines += ["hooks", f"  copy  {len(copies)} file{'s' if len(copies) != 1 else ''} into {home(HOME)}" if copies else f"  ok    hooks, githooks, commands and AGENTS.md in {home(HOME)}"]

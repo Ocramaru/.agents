@@ -27,14 +27,14 @@ The hub: standards, notes and review, linked into every agent from `~/.agents`.
 | deps | `duckdb` and `rich`, imported only where used |
 | models | subscription CLIs and local endpoints, nothing metered |
 | install | `agent install`. A clone is linked and answers at `~/.agents`; an install (`uv tool install`) copies its hooks, githooks, commands and AGENTS.md there, and its hooks call `agent` on PATH |
-| paths | `profile.SHIPPED` is what ships, read-only; `profile.HOME` is this machine's state. A clone is both, so never assume they differ, nor that they are the same |
+| paths | `hub.BUNDLED` is what agentkit comes with, read-only; `hub.HOME` is this machine's state. A clone is both, so never assume they differ, nor that they are the same. `profile.py` is only about your profile, and `git.run` runs git anywhere |
 | stores | append-only, uuid7 keys, one writer per duckdb file |
 
 ## How the parts fit
 
 | | |
 |---|---|
-| `standards/` | the data: `applies` globs, `related` names; the ones shipped here are starters |
+| `standards/` | the data: `applies` globs, `related` names; the ones bundled here are starters |
 | `profile.py` | where your own standards, reviewers, backends and config live; one replaces a starter by name, and a repo still layers on top |
 | `library_for` | the only answer to which standards govern a file; inject and review both use it |
 | `inject.py` | standards, notes and open findings for a file, once per session |

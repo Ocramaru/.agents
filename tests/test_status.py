@@ -10,7 +10,8 @@ from types import SimpleNamespace
 
 from conftest import REPO, agent, git, note, put, record, standard
 
-from agentkit import hooks, profile, reviews, status
+import agentkit.git
+from agentkit import hooks, hub, reviews, status
 
 
 def described(output: str) -> dict[str, list[str]]:
@@ -44,14 +45,14 @@ def test_the_profile_its_remote_and_where_each_standard_comes_from(tmp_path):
   standard(repo / ".agents" / "standards", "local", applies="*.zz")
   standard(repo / ".agents" / "standards", "commits")   # layers on the starter, which still counts
 
-  profile.git(tmp_path, "init", "-q", "--bare", "-b", "main", str(bare))
-  profile.git(tmp_path, "clone", "-q", str(bare), str(mine))
+  agentkit.git.run(tmp_path, "init", "-q", "--bare", "-b", "main", str(bare))
+  agentkit.git.run(tmp_path, "clone", "-q", str(bare), str(mine))
   standard(mine / "standards", "python")   # replaces the starter of its name
   standard(mine / "standards", "extra")
-  profile.git(mine, "add", "-A")
-  profile.git(mine, "-c", "user.name=T", "-c", "user.email=t@t.io", "commit", "-qm", "pushed")
-  profile.git(mine, "push", "-q", "-u", "origin", "main")
-  profile.git(mine, "-c", "user.name=T", "-c", "user.email=t@t.io", "commit", "--allow-empty", "-qm", "not pushed")
+  agentkit.git.run(mine, "add", "-A")
+  agentkit.git.run(mine, "-c", "user.name=T", "-c", "user.email=t@t.io", "commit", "-qm", "pushed")
+  agentkit.git.run(mine, "push", "-q", "-u", "origin", "main")
+  agentkit.git.run(mine, "-c", "user.name=T", "-c", "user.email=t@t.io", "commit", "--allow-empty", "-qm", "not pushed")
 
   shown = described(agent(["status"], cwd=repo / "pkg", env={"AGENTS_PROFILE": str(mine)}).stdout)
   assert shown["profile"] == [str(mine), f"remote {bare}", "1 commit not pushed"]
@@ -66,7 +67,7 @@ def test_the_default_backend_its_models_and_the_role_each_reviewer_asks_for(tmp_
   put(mine, "config.toml", text='[backends]\ndefault = "local"\n\n[backends.local]\nkind = "http"\nmodels = { text = "small-one", code-large = "big-one" }\n')
   put(mine, "agents/mine.md", text="---\nname: mine\nmodel: code\n---\n\nreview\n")
   monkeypatch.setenv("AGENTS_PROFILE", str(mine))
-  monkeypatch.setattr(profile, "LOCAL", tmp_path / "local.toml")   # never this machine's
+  monkeypatch.setattr(hub, "LOCAL", tmp_path / "local.toml")   # never this machine's
   monkeypatch.chdir(tmp_path)
 
   (_, backend), (_, models), (_, reviewers) = status.backend()
@@ -76,7 +77,7 @@ def test_the_default_backend_its_models_and_the_role_each_reviewer_asks_for(tmp_
 
 
 def test_the_hooks_claude_and_git_run_and_the_errors_they_logged_since_agents_changed(tmp_path):
-  """The shipped hooks block reads as in place, a core.hooksPath at this hub as this hub's, and only errors newer than the last commit count."""
+  """The bundled hooks block reads as in place, a core.hooksPath at this hub as this hub's, and only errors newer than the last commit count."""
   put(tmp_path, "claude/settings.json", text=json.dumps({"model": "x", "hooks": json.loads((REPO / "settings.hooks.json").read_text())}))
   put(tmp_path, "gitconfig", text=f"[core]\n  hooksPath = {REPO / 'githooks'}\n")
   put(tmp_path, "hooks.log", text="2000-01-01T09:00:00+0000\tinject    \tabc12345\tERROR stale\n2100-01-01T09:00:00+0000\tinject    \tabc12345\tsent 2 standards\n2100-01-02T09:00:00+0000\tno-reformat\tabc12345\tERROR jq: parse error\nnot a row\n")
@@ -114,7 +115,7 @@ def test_a_broken_part_is_described_and_the_rest_still_show(tmp_path, monkeypatc
 
 def test_an_install_with_no_record_to_date_it_by_counts_every_error_rather_than_failing(tmp_path, monkeypatch):
   """When the install's RECORD is gone, every logged error counts, and the window doctor and status share does not raise."""
-  monkeypatch.setattr(hooks.profile, "INSTALLED", True)
+  monkeypatch.setattr(hooks.hub, "INSTALLED", True)
   monkeypatch.setattr(hooks.importlib.metadata, "distribution", lambda name: SimpleNamespace(files=[SimpleNamespace(name="RECORD", locate=lambda: tmp_path / "gone" / "RECORD")]))
   monkeypatch.setattr(hooks, "entries", lambda: [["2000-01-01T09:00:00+0000", "inject", "abc12345", "ERROR", "old"]])
   assert [row[4] for row in hooks.errors()] == ["old"]
