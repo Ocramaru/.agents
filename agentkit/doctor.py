@@ -12,7 +12,7 @@ import shutil
 import tomllib
 from pathlib import Path
 
-from agentkit import agents, backends, config, git, guard, hooks, hub, inject, install, issue, mapblock, notes, profile, tree
+from agentkit import agents, backends, config, gh, git, guard, hooks, hub, inject, install, mapblock, notes, profile, tree
 from agentkit.frontmatter import load
 from agentkit.standards import Library
 MODES = ("full", "context", "none")   # what agents.toml `inject` may say
@@ -89,7 +89,7 @@ def checks() -> list[tuple[bool, str, str]]:
   out.append((bool(shutil.which("jq")), "jq on PATH, which every hook parses its payload with", "install jq (on a Mac: brew install jq); without it no hook does anything"))
   out.append((bool(shutil.which("uv")), "uv on PATH, so the hub manages its own venv", "install uv; without it `agent sub review` cannot reach duckdb"))
   # `agent issue` drafts without gh; gh is how it finds an issue already filed, and how `--list` reads them
-  out.append((bool(shutil.which("gh") and issue.gh("auth", "status").returncode == 0), "gh authenticated, so `agent issue` can find an issue already filed", "install gh and run `gh auth login`; without it `agent issue` cannot see what is already filed, and `agent issue --list` cannot read it"))
+  out.append((bool(shutil.which("gh") and gh.run("auth", "status").returncode == 0), "gh authenticated, so `agent issue` can find an issue already filed", "install gh and run `gh auth login`; without it `agent issue` cannot see what is already filed, and `agent issue --list` cannot read it"))
 
   errors = hooks.errors()   # a crashing hook only shows in the log
   out.append((not errors, "no hook errors since .agents last changed", f"{len(errors)} logged, the latest from {errors[-1][1]}: {errors[-1][4][:120]}; `agent hooks` lists them" if errors else ""))
@@ -101,7 +101,7 @@ def checks() -> list[tuple[bool, str, str]]:
 
     # a profile holds how you work and your models, so its repo is private; gh can say so only for GitHub
     origin = git.run(where, "remote", "get-url", "origin").stdout.strip() if where.is_dir() else ""
-    if "github.com" in origin and (repository := issue.named(origin)) and (seen := issue.gh("repo", "view", repository, "--json", "isPrivate", "--jq", ".isPrivate")).returncode == 0:
+    if "github.com" in origin and (repository := gh.repository(origin)) and (seen := gh.run("repo", "view", repository, "--json", "isPrivate", "--jq", ".isPrivate")).returncode == 0:
       out.append((seen.stdout.strip() == "true", f"profile remote {repository} is private", f"it is public, and a profile holds how you work and your models: gh repo edit {repository} --visibility private --accept-visibility-change-consequences"))
 
   out.append((importlib.util.find_spec("duckdb") is not None, "duckdb present, reviews can be kept", "`uv sync` in ~/.agents; everything but `agent sub review` works without it"))

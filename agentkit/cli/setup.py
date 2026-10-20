@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agentkit import backends, config, doctor, git, guard, hooks, hub, install, issue, profile, reviews, status, version
+from agentkit import backends, config, doctor, gh, git, guard, hooks, hub, install, issue, profile, reviews, status, version
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli.out import done, escape, fail, line, note, report, table
 
@@ -68,7 +68,7 @@ def cmd_install(args) -> int:
     os.execve(kept, [kept, *sys.argv[1:]], os.environ | {"PATH": os.pathsep.join(entry for entry in os.environ.get("PATH", "").split(os.pathsep) if Path(entry).resolve() != (Path(sys.prefix) / "bin").resolve())})   # without uvx's own environment, which leads PATH
 
   answer = args.profile
-  if answer is None and profile.path() is None and profile.chosen() is None and sys.stdin.isatty() and issue.login():   # once, as every answer is recorded; a profile wants a private GitHub repo, so the question waits for gh
+  if answer is None and profile.path() is None and profile.chosen() is None and sys.stdin.isatty() and gh.login():   # once, as every answer is recorded; a profile wants a private GitHub repo, so the question waits for gh
     line(PROFILE_QUESTION.format(default=install.home(profile.DEFAULT)))
     answer = ask("profile [new]: ") or "new"
 
@@ -77,9 +77,9 @@ def cmd_install(args) -> int:
   if code: return code
 
   if answer == "new" and not git.run(profile.DEFAULT, "remote").stdout.strip():   # a profile reaches other machines only once pushed
-    login = issue.login()
+    login = gh.login()
     if login and sys.stdin.isatty() and ask(f"\nMake {login}/.agents.profile on GitHub, private, and push your profile there? [y/N] ").lower() in ("y", "yes"):   # it publishes, so it asks
-      made = issue.gh("repo", "create", f"{login}/.agents.profile", "--private", "--source", str(profile.DEFAULT), "--remote", "origin", "--push")
+      made = gh.run("repo", "create", f"{login}/.agents.profile", "--private", "--source", str(profile.DEFAULT), "--remote", "origin", "--push")
       line(f"  made  {login}/.agents.profile, private, and pushed" if made.returncode == 0 else f"  FAIL  {(made.stderr.strip().splitlines() or ['gh said nothing'])[-1]}")
     if not git.run(profile.DEFAULT, "remote").stdout.strip():
       done("", "Push your profile somewhere private, so your other machines get it:", f"  git -C {profile.DEFAULT} remote add origin git@github.com:{login or '<you>'}/.agents.profile.git", f"  git -C {profile.DEFAULT} push -u origin main")

@@ -9,7 +9,7 @@ import argparse, json, platform, socket, subprocess, urllib.parse, webbrowser
 import pytest
 from conftest import git
 
-from agentkit import cli, doctor, issue, version
+from agentkit import cli, doctor, gh as agentkit_gh, issue, version
 
 HUB = "Ocramaru/.agents"
 OPEN_FOUR = [{"number": 4, "title": "Close takes file line but open prints file", "url": "https://github.com/Ocramaru/.agents/issues/4"}]
@@ -23,7 +23,7 @@ def gh(monkeypatch):
     reply = fake.replies.get(verb := args[1] if len(args) > 1 else "", "[]" if verb == "list" else "")   # gh prints [] when nothing is open
     return subprocess.CompletedProcess(args, fake.code, reply if isinstance(reply, str) else json.dumps(reply), "gh: not logged in" if fake.code else "")
   fake.calls, fake.replies, fake.code = [], {}, 0
-  monkeypatch.setattr(issue, "gh", fake)
+  monkeypatch.setattr(agentkit_gh, "run", fake)
   return fake
 
 
@@ -173,10 +173,10 @@ def test_the_listing_counts_replies_and_an_unreadable_list_is_a_message(gh, monk
   monkeypatch.undo()   # the real gh again
   with monkeypatch.context() as patch:
     patch.setenv("PATH", "/nonexistent")
-    result = issue.gh("auth", "status")
+    result = agentkit_gh.run("auth", "status")
   assert result.returncode == 127 and "not installed" in result.stderr
 
-  monkeypatch.setattr(issue, "gh", lambda *args: subprocess.CompletedProcess(args, 1, "", "gh: not logged in"))
+  monkeypatch.setattr(agentkit_gh, "run", lambda *args: subprocess.CompletedProcess(args, 1, "", "gh: not logged in"))
   assert "could not read" in issue.filed(HUB)[0]
 
 
@@ -184,7 +184,7 @@ def test_the_listing_counts_replies_and_an_unreadable_list_is_a_message(gh, monk
 def test_doctor_checks_gh_for_the_duplicate_lookup_and_the_listing(monkeypatch, returncode, passes):
   """The gh check passes when gh is logged in and fails when it is not, and it names what gh is still for."""
   monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/usr/bin/{name}")
-  monkeypatch.setattr(issue, "gh", lambda *args: subprocess.CompletedProcess(args, returncode, "", ""))
+  monkeypatch.setattr(agentkit_gh, "run", lambda *args: subprocess.CompletedProcess(args, returncode, "", ""))
   (passed, label, fix), = [check for check in doctor.checks() if "gh authenticated" in check[1]]
   assert passed == passes and "find an issue already filed" in label and "--list" in fix and "reach the hub" not in label
 
