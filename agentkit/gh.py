@@ -9,7 +9,7 @@ import subprocess
 
 
 def run(*args: str) -> subprocess.CompletedProcess:
-  """Run the GitHub CLI; exit 127 when it is missing."""
+  """Run the GitHub CLI and return what it did; a missing gh comes back as exit code 127."""
   try: return subprocess.run(["gh", *args], capture_output=True, check=False, text=True)
   except FileNotFoundError:   # most people cloning .agents will not have it
     return subprocess.CompletedProcess(["gh", *args], 127, "", "gh is not installed: https://cli.github.com")
@@ -25,4 +25,4 @@ def login() -> str:
 def repository(address: str) -> str | None:
   """owner/name from a remote's URL or scp-style address, or None when it names no repo."""
   match = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$", address)
-  return match.group(1) if match else None      # a failed call prints nothing, so it cannot match
+  return match.group(1) if match else None      # an empty address, as a failed git call leaves, names nothing

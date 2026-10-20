@@ -183,7 +183,7 @@ def test_update_upgrades_an_install_through_uv_and_lands_the_new_hooks(machine, 
   (source / "pyproject.toml").write_text((source / "pyproject.toml").read_text().replace(f'version = "{number}.1"', f'version = "{number}.2"'))
   (home / ".agents" / "agentkit").mkdir()   # what makes the new version's install refuse: ~/.agents looks like a clone
   failed = subprocess.run([str(tmp_path / "bin" / "agent"), "update"], capture_output=True, check=False, cwd=tmp_path, env=machine, stdin=subprocess.DEVNULL, text=True)
-  assert failed.returncode == 1 and f"FAIL   .agents: upgraded {number}.1 -> {number}.2, but its install did not finish" in failed.stdout
+  assert failed.returncode == 1 and f"FAIL   .agents: upgraded {number}.1 -> {number}.2, but its install did not finish (cannot install: " in failed.stdout and "is a clone of .agents" in failed.stdout
 
 
 def test_an_install_through_uvx_keeps_agentkit_as_a_tool_and_installs_from_it(wheel, machine, tmp_path):

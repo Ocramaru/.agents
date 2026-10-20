@@ -1,4 +1,4 @@
-"""Review conversations, in an append-only DuckDB ledger under the repo they are about; a reply is a new row.
+"""Review conversations, in an append-only DuckDB file under the repo they are about; a reply is a new row.
 Keys are uuid7, so `id > last_seen` is the sync cursor and rows from two machines never conflict.
 DuckDB is imported where it is used, so `agent inject`, `agent standards` and the hooks run with nothing installed.
 
@@ -39,7 +39,7 @@ create table if not exists closures (
   author text, "at" double, verdict text, reason text
 );
 -- the invocation a review belonged to, so "what did that run say" has an answer. Added, not
--- created, so a ledger from before it gains the column instead of failing every insert.
+-- created, so reviews from before it gain the column instead of failing every insert.
 alter table reviews add column if not exists run text;
 -- what a verdict judged -- file, instructions, model, effort -- so an unchanged file need not be asked again
 alter table reviews add column if not exists digest text;
@@ -188,7 +188,7 @@ def write(record: dict, root: Path) -> str:
 
 @contextmanager
 def _reading(root: Path):
-  """One read-only connection for a whole operation, closed after; None when there is no ledger yet."""
+  """One read-only connection for a whole operation, closed after; None when there are no reviews yet."""
   connection = connect(root, read_only=True)
   try: yield connection
   finally:
@@ -208,7 +208,7 @@ def _select(connection, sql: str, parameters: list | None = None) -> list[dict]:
 
 
 def query(root: Path, sql: str, parameters: list | None = None) -> list[dict]:
-  """Read-only, so a review running in another process does not block a look at the ledger."""
+  """Read-only, so a review running in another process does not block a look at the reviews."""
   with _reading(root) as connection:
     return [] if connection is None else _select(connection, sql, parameters)
 
@@ -244,7 +244,7 @@ def verdicts(root: Path) -> dict[str, dict]:
 
 
 def last_run(root: Path) -> str | None:
-  """The newest run's id, or None on a ledger no run has been recorded in."""
+  """The newest run's id, or None when no run has been recorded."""
   with _reading(root) as connection:
     if connection is None or not _has(connection, "reviews", "run"): return None   # read-only cannot add the column; nothing to find
     rows = _select(connection, "select run from reviews where run is not null order by id desc limit 1")
@@ -366,8 +366,8 @@ def close(root: Path, file: str, line: int, verdict: str, reason: str = "") -> l
   who, now = author(), time.time()
   closures = [{"id": str(uuid7()), "finding_id": finding["id"], "task": finding["task"], "file": finding["file"], "line": finding["line"], "issue": finding["issue"], "author": who, "at": now, "verdict": verdict, "reason": reason} for finding in hits]
   # a dismissal judges code that lands unchanged, so a worktree's main checkout keeps it too, under the same id; a fix lands with its code
-  for ledger in ([root, main] if verdict in KEEP_QUIET and closures and (main := git.main_checkout(root)) else [root]):
-    with writer(ledger) as put:
+  for checkout in ([root, main] if verdict in KEEP_QUIET and closures and (main := git.main_checkout(root)) else [root]):
+    with writer(checkout) as put:
       for closure in closures: put({"closure": closure})
   return hits
 
@@ -376,10 +376,10 @@ def dismissals(root: Path) -> dict[str, list[dict]]:
   """What was closed as wrong or not worth fixing, by file, for the reviewer to read next time.
   A linked worktree reads its main checkout's as well, where every worktree's dismissals also land."""
   found: dict[str, dict] = {}
-  for ledger in filter(None, (root, git.main_checkout(root))):
-    with _reading(ledger) as connection:
+  for checkout in filter(None, (root, git.main_checkout(root))):
+    with _reading(checkout) as connection:
       if connection is None or not _has(connection, "closures"): continue
-      # by id, since a dismissal made in a worktree is in both ledgers
+      # by id, since a dismissal made in a worktree is in both checkouts' reviews
       found |= {row["id"]: row for row in _select(connection, f"""select id, file, line, issue, verdict, reason, author from closures where verdict in ({", ".join("?" * len(KEEP_QUIET))})""", list(KEEP_QUIET))}
 
   out: dict[str, list[dict]] = {}
@@ -388,7 +388,7 @@ def dismissals(root: Path) -> dict[str, list[dict]]:
 
 
 def adopt(source: Path, root: Path) -> tuple[list[dict], int]:
-  """Copy the dismissals in another ledger file into this checkout's, skipping any already here; returns those added and how many were here.
+  """Copy the dismissals in another reviews file into this checkout's, skipping any already here; returns those added and how many were here.
   A closure carries the file, line and issue a reviewer is told, so no finding or review comes with it: a review would supersede this checkout's own."""
   with _reading(root) as connection:   # before duckdb is imported below, so a missing one gets connect's message
     known = {row["id"] for row in _select(connection, "select id from closures")} if connection is not None and _has(connection, "closures") else set()

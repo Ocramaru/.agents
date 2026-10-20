@@ -6,7 +6,7 @@
 #
 # gate_skip <hook> <path> <session>         0 = the answer is known and empty, so skip
 # gate_mark <hook> <path> <session> [dep]   remember it, until `dep` is newer than now
-# gate_ledger <path>                        sets GATE_LEDGER: the reviews db that could change it
+# gate_reviews <path>                       sets GATE_REVIEWS: the reviews db that could change it
 #
 # Author: Marco Cassar (@Ocramaru)
 
@@ -35,11 +35,11 @@ gate_mark() {
   printf '%s\n' "${4:-}" > "$GATE_STAMP" 2>/dev/null || true
 }
 
-gate_ledger() {  # walks up to the nearest .agents, so no fork to git
+gate_reviews() {  # walks up to the nearest .agents, so no fork to git
   local directory="${1%/*}"
-  GATE_LEDGER=""
+  GATE_REVIEWS=""
   while [[ -n "$directory" && "$directory" != "/" ]]; do
-    [[ -d "$directory/.agents" ]] && { GATE_LEDGER="$directory/.agents/.reviews/reviews.duckdb"; return 0; }
+    [[ -d "$directory/.agents" ]] && { GATE_REVIEWS="$directory/.agents/.reviews/reviews.duckdb"; return 0; }
     [[ "$directory" == */* ]] || return 0   # a relative path's last part, which stripping would never shorten
     directory="${directory%/*}"
   done

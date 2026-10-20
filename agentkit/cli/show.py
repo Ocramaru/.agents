@@ -26,7 +26,7 @@ def result(reviewed: dict, at: str = "", out=None) -> None:
   """One review: what it returned, and the command that acts on it, printed as a run lands and when read back."""
   put = lambda text: say(text, out)
 
-  head = f"{at}{escape(reviewed['file'])}  [dim]{reviewed['agent']}{f" · {took(reviewed['seconds'])}" if reviewed.get("seconds") else ""}[/dim]"
+  head = f"{at}{escape(reviewed['file'])}  [dim]{escape(reviewed['agent'])}{f" · {took(reviewed['seconds'])}" if reviewed.get("seconds") else ""}[/dim]"
   count, kind = len(reviewed["findings"]), outcome(reviewed)
 
   if kind == "failed":
@@ -38,7 +38,7 @@ def result(reviewed: dict, at: str = "", out=None) -> None:
     put(f"    {escape(reviewed['body'])}")
     put(f"    [dim]answer: agent sub reply {reviewed['task']} '<answer>'[/dim]")
   elif kind == "unchanged":   # not asked again: its verdict still stands
-    put(f"[dim]= {at}{escape(reviewed['file'])}  {reviewed['agent']}  unchanged since run {reviewed['reused']} · {f'{count} still open' if count else 'nothing open'}[/dim]")
+    put(f"[dim]= {at}{escape(reviewed['file'])}  {escape(reviewed['agent'])}  unchanged since run {reviewed['reused']} · {f'{count} still open' if count else 'nothing open'}[/dim]")
     for finding in reviewed["findings"]: put(f"    [dim]{escape(str(finding.get('line', '?'))):>6}  {escape(oneline(finding.get('issue', ''), 120))}[/dim]")
   elif kind == "empty":
     put(f"[dim]– {at}{escape(reviewed['file'])}  empty, nothing to review[/dim]")

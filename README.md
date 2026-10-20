@@ -94,7 +94,7 @@ agent sub reviews --open --path src/models/
 agent sub reviews --failed --agent logic
 ```
 
-`--last` or `--run <id>` reads a run back as it printed. `--open` lists what is still unresolved; `--path` takes a folder or a pattern like `'*.py'`, and `--agent` a reviewer or a kind. Close findings by the id `--open` shows, `agent sub close <id> --as fixed`, or `--as wrong --reason '…'` so the next review does not raise it again. In a git worktree, a `wrong` or `wontfix` closure is written to the main checkout's ledger as well and a review reads both, so it survives the work landing; `agent sub import <ledger>` copies the ones another ledger already holds. `agent sub review --recheck` asks again about every file with something open or claimed fixed. An agent reading results should pass `--jsonl`: one JSON object per file, as each finishes.
+`--last` or `--run <id>` reads a run back as it printed. `--open` lists what is still unresolved; `--path` takes a folder or a pattern like `'*.py'`, and `--agent` a reviewer or a kind. Close findings by the id `--open` shows, `agent sub close <id> --as fixed`, or `--as wrong --reason '…'` so the next review does not raise it again. In a git worktree, a `wrong` or `wontfix` closure is written to the main checkout's reviews as well and a review reads both, so it survives the work landing; `agent sub import <reviews>` copies the ones another checkout's reviews already hold. `agent sub review --recheck` asks again about every file with something open or claimed fixed. An agent reading results should pass `--jsonl`: one JSON object per file, as each finishes.
 
 ## What is in here
 

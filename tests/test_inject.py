@@ -18,7 +18,7 @@ The preamble, which stays in the index.
 
 ## Reviews
 
-REVIEWS-RULE the ledger is append-only
+REVIEWS-RULE the reviews are append-only
 
 ## Hooks
 

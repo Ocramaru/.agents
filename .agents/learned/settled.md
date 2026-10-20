@@ -6,7 +6,7 @@ kind: learned
 
 # Settled
 
-- **A dismissal travels as its closure row alone.** A closure carries the file, line, issue and reason a reviewer is shown, and `dismissals` joins it to nothing. Copying the finding's review as well would make it the newest verdict for its task in the main checkout, superseding that checkout's own open findings, and a finding without its review joins to nothing and shows nowhere. One id in both ledgers is what lets a review read a dismissal once and `agent sub import` skip what is already there.
+- **A dismissal travels as its closure row alone.** A closure carries the file, line, issue and reason a reviewer is shown, and `dismissals` joins it to nothing. Copying the finding's review as well would make it the newest verdict for its task in the main checkout, superseding that checkout's own open findings, and a finding without its review joins to nothing and shows nowhere. One id in both checkouts' reviews is what lets a review read a dismissal once and `agent sub import` skip what is already there.
 
 - **`git rev-parse --git-dir --git-common-dir` differ only in a linked worktree.** Its common dir is the main checkout's `.git`, except for a bare repo's worktree (common dir `x.git`, or a bare repo kept in `.git`, which has no work tree) and a submodule's (`.git/modules/x`), which have no main checkout. From a subdirectory of a main checkout git prints the common dir relative, `../.git`, so it is resolved against the directory asked about.
 
@@ -18,7 +18,7 @@ kind: learned
 
 - **The public `.agents` plus a private profile reproduces the hub exactly.** Staged from HEAD and checked both ways: `.agents` alone passes its whole suite on the starters with every reviewer and standard resolving, and `.agents` plus the profile governs every probed file type with the same standards as before, the profile's own versions delivered. The cutover was rehearsed against local bare repos for the first machine and a following one, 17 checks each. A leak scan over the public tree found 14 references to private projects in code comments and fixtures before anything was published.
 
-- **Four in five `inject` calls produced nothing.** Of 250 logged calls, 69% were already in context and 12% governed by nothing, each paying ~90 ms for a `uv run`. `hooks/gate.sh` remembers the empty answer per session and path, keyed to the review ledger, and the same edit costs 12 ms.
+- **Four in five `inject` calls produced nothing.** Of 250 logged calls, 69% were already in context and 12% governed by nothing, each paying ~90 ms for a `uv run`. `hooks/gate.sh` remembers the empty answer per session and path, keyed to the reviews, and the same edit costs 12 ms.
 
 - **`map_over` at 2048 made a 2 KB note worse, not cheaper.** A 2070-byte `context.md` was sent as a 375-byte table instead of itself. Raised to 6144: against a 24000 budget, the map is for a note that is genuinely long.
 
@@ -45,7 +45,7 @@ kind: learned
 - **A hand edit never fires a `PostToolUse` hook**, so a map goes stale silently and a rendered table reads as authoritative while being wrong. Injection now heals a drifted map before using it.
 - **`hash()` is salted per process**, so the default task id from `agent sub run` never matched on a later invocation and a session could not be resumed without `--task`. Content hash now.
 
-- **The loop is closed, and injection is where it closes.** A commit fires `hooks/post-commit.sh`, which reviews only the files the agent's standards govern, detached, into the repo's duckdb ledger. `inject.payload()` then carries the open findings for a file to whoever edits it next, keyed on a hash of the findings so a review landing mid-session still arrives. Verified end to end in a clean repo: commit a file with an inverted comparison plus a `.png`, and one file is reviewed, one finding is stored, and the next `agent inject` on that file carries it. The `.png` never reaches a model.
+- **The loop is closed, and injection is where it closes.** A commit fires `hooks/post-commit.sh`, which reviews only the files the agent's standards govern, detached, into the repo's duckdb reviews. `inject.payload()` then carries the open findings for a file to whoever edits it next, keyed on a hash of the findings so a review landing mid-session still arrives. Verified end to end in a clean repo: commit a file with an inverted comparison plus a `.png`, and one file is reviewed, one finding is stored, and the next `agent inject` on that file carries it. The `.png` never reaches a model.
 
 - **`uv run` costs about 30ms, which the inject hook can afford.** Measured against the ~90ms the hook already takes. Running `bin/agent` through uv means a fresh clone provisions its own venv, duckdb included, so the dependency does not have to be installed by hand or into a system python Debian has marked externally managed. Without uv it falls back to `python3` and everything but `agent sub review` still works.
 

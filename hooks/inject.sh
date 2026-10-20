@@ -37,8 +37,8 @@ fi
 if [[ -z "$text" ]]; then
   # agent exits 3 when nothing governs the file, 1 when it was already sent this session. Either way
   # the answer holds for the session, so remember it rather than asking again on the next edit.
-  gate_ledger "$path"
-  gate_mark inject "$path" "$session" "$GATE_LEDGER"
+  gate_reviews "$path"
+  gate_mark inject "$path" "$session" "$GATE_REVIEWS"
   if [[ "$rc" -eq 3 ]]; then hook_log inject "$session" "none   nothing governs this file  $path"
   else hook_log inject "$session" "quiet  already in context         $path"; fi
   exit 0

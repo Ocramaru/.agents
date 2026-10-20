@@ -15,7 +15,7 @@ from agentkit.cli.out import done, escape, fail, line, note, report, table
 
 HOOK_MARK = "# installed by `agent hook install`"
 HOOK = f"""#!/usr/bin/env bash
-{HOOK_MARK} -- review each commit into this repo's ledger.
+{HOOK_MARK} -- review each commit into this repo's reviews.
 exec "$HOME/.agents/hooks/post-commit.sh" {{agent}} {{backend}}
 """
 
@@ -174,7 +174,7 @@ def cmd_update(args) -> int:
     else:
       copied = subprocess.run([str(install.CLI), "install"], capture_output=True, check=False, stdin=subprocess.DEVNULL, text=True)   # no terminal, so it never asks
       bad += copied.returncode != 0
-      done(f"ok     .agents: upgraded {was} -> {now}" if copied.returncode == 0 else f"FAIL   .agents: upgraded {was} -> {now}, but its install did not finish; run `agent install`", *(f"       {said.strip()}" for said in copied.stdout.splitlines() if (said.split() or [""])[0] in ("copy", "wrote", "link", "point", "saved", "cannot")))
+      done(f"ok     .agents: upgraded {was} -> {now}" if copied.returncode == 0 else f"FAIL   .agents: upgraded {was} -> {now}, but its install did not finish ({((copied.stderr or copied.stdout).strip().splitlines() or ['it said nothing'])[-1]}); run `agent install`", *(f"       {said.strip()}" for said in copied.stdout.splitlines() if (said.split() or [""])[0] in ("copy", "wrote", "link", "point", "saved", "cannot")))
 
   for name, where in ((".agents", None if hub.INSTALLED else hub.BUNDLED), ("profile", profile.path())):
     if name == ".agents" and where is None: continue

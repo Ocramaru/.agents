@@ -6,7 +6,7 @@ kind: learned
 
 # Traps
 
-- **A ledger belongs to one checkout, and only its dismissals travel.** Findings closed `--as wrong` in a worktree were unknown to `~/.agents`, whose next review of the same lines raised them again; the uv-install worktree alone held 54. A linked worktree writes `wrong` and `wontfix` closures to the main checkout's ledger as well, under the same id, and a review reads both. Open findings and `fixed` stay where they were made. A dismissal that never reached the main ledger, made before this or lost when the second write failed, is copied with `agent sub import <ledger> --root <main checkout>`.
+- **A checkout's reviews belong to it, and only its dismissals travel.** Findings closed `--as wrong` in a worktree were unknown to `~/.agents`, whose next review of the same lines raised them again; the uv-install worktree alone held 54. A linked worktree writes `wrong` and `wontfix` closures to the main checkout's reviews as well, under the same id, and a review reads both. Open findings and `fixed` stay where they were made. A dismissal that never reached the main checkout's reviews, made before this or lost when the second write failed, is copied with `agent sub import <reviews> --root <main checkout>`.
 
 - **A hook that exits 0 when its CLI fails hides a command that no longer exists.** doc-check.sh called `agent run` after `run` moved under `agent sub`, and `|| exit 0` with nothing logged made every opted-in session end look like a clean check. A hook that cannot run its CLI logs an ERROR with the last line the CLI printed.
 
@@ -40,7 +40,7 @@ kind: learned
 
 - **A model's output is not the shape the prompt asked for.** Besides findings as a bare list, one review returned four entries that were a line number and two empty strings, and line fields arrive as prose (`12-14`, `86, 90`), which `isdigit` read as no line and so closed every finding in the file. Drop entries with a blank issue, and read a line as its first number.
 
-- **The ledger's schema grows, so neither writers nor readers may assume it.** Positional insert values broke the day a column was added, and a read-only connection cannot migrate, so `--open` broke on a ledger written before `closures` existed. Name the columns in every insert; check a table or column exists before reading it.
+- **The reviews' schema grows, so neither writers nor readers may assume it.** Positional insert values broke the day a column was added, and a read-only connection cannot migrate, so `--open` broke on reviews written before `closures` existed. Name the columns in every insert; check a table or column exists before reading it.
 
 - **Only a verdict replaces a conversation's open findings.** A question to the reviewer, or a recheck that failed, wrote the newest record and erased its findings with no closure. A record supersedes only when it is a findings verdict or carries findings.
 
@@ -56,7 +56,7 @@ kind: learned
 
 - **A regex cannot see shell quoting.** The formatter guard's second regex matched a formatter after `&&` inside a quoted string. Parse with `shlex` and match only at a command position.
 
-- **Every commit a subagent makes in its worktree starts a full background review.** The global post-commit hook fires there too, so three agents' commits started three reviews of work about to be squashed, each writing a ledger into a worktree that was then removed. A rebase does the same for every commit it rewrites: one autosquash over nine commits started nine reviews at once, about 36 `claude -p` calls on history already reviewed. Squash first and let the landed commit be the one reviewed, or pass `-c core.hooksPath=/dev/null` to the rebase, or expect the folders to reappear until those reviews finish.
+- **Every commit a subagent makes in its worktree starts a full background review.** The global post-commit hook fires there too, so three agents' commits started three reviews of work about to be squashed, each writing reviews into a worktree that was then removed. A rebase does the same for every commit it rewrites: one autosquash over nine commits started nine reviews at once, about 36 `claude -p` calls on history already reviewed. Squash first and let the landed commit be the one reviewed, or pass `-c core.hooksPath=/dev/null` to the rebase, or expect the folders to reappear until those reviews finish.
 
 - **A subagent given its own worktree starts from `origin/main`, not local `main`.** With eleven commits unpushed, five agents began on code from before the CLI split. Push first, or have each agent `git reset --hard main` before it starts.
 

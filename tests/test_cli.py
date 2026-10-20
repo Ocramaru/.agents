@@ -176,3 +176,8 @@ def test_a_file_left_out_by_limit_is_not_called_one_no_standard_covers(project):
   (project / "src" / "pkg" / "other.py").write_text("y = 2\n")
   said = agent(["sub", "review", "file-review", "src/pkg/mod.py", "src/pkg/other.py", "--limit", "1", "--dry-run"], cwd=project).stderr
   assert "reviewing the first 1" in said and "no standard covers" not in said
+
+
+def test_a_negative_limit_is_refused_rather_than_read_from_the_end(project):
+  """--limit counts files from the start, so a negative one is refused instead of reviewing all but the last."""
+  assert "--limit is how many files" in agent(["sub", "review", "file-review", "src/pkg/mod.py", "--limit", "-1", "--dry-run"], cwd=project, expect=2).stderr

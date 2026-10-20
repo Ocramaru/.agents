@@ -86,6 +86,8 @@ def test_the_draft_names_the_commit_and_nothing_private_unless_asked(gh, browser
   assert "project" not in plain and socket.gethostname() not in plain
   assert "met in project" in asked and socket.gethostname() in asked
   assert "met in project" in sent(asked)["body"] and socket.gethostname() in sent(asked)["body"]
+  (outside := elsewhere.parent / "not-a-repo").mkdir()
+  assert "met in not-a-repo · " in issue.draft("t", "", outside, HUB, context=True) and str(outside.parent) not in issue.draft("t", "", outside, HUB, context=True)   # a folder's name, never its path
 
 
 def test_an_open_issue_with_the_same_title_opens_that_issue_and_prints_the_body_to_paste(gh, browser, elsewhere):
@@ -103,8 +105,8 @@ def test_an_open_issue_with_the_same_title_opens_that_issue_and_prints_the_body_
   assert browser[-1].startswith("https://github.com/Ocramaru/.agents/issues/new?")   # nothing left to compare is never a match
 
 
-@pytest.mark.parametrize("code, reply", [(127, "gh is not installed"), (1, "gh: not logged in")], ids=["missing", "logged out"])
-def test_without_gh_the_draft_is_made_and_says_the_duplicate_check_was_skipped(gh, browser, elsewhere, code, reply):
+@pytest.mark.parametrize("code", [127, 1], ids=["missing", "logged out"])
+def test_without_gh_the_draft_is_made_and_says_the_duplicate_check_was_skipped(gh, browser, elsewhere, code):
   """A gh that is missing or logged out costs the duplicate check and nothing else: the new issue still opens."""
   gh.code = code
   said = issue.draft("a title", "what happened", elsewhere, HUB)

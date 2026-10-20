@@ -30,7 +30,7 @@ def _repo(given: str | None) -> Path:
 
 
 def _turn(args, conversation: Session, agent: str, backend, root: Path, file: str, message, role: str, run: str) -> int:
-  """A conversation's new turn: kept in the ledger, the one store, then shown as a review result is."""
+  """A conversation's new turn: kept in the repo's reviews, the one store, then shown as a review result is."""
   findings = review.findings(message.data)
   if file:   # one file per conversation, so the file is known here and the model's name for it is not
     for finding in findings: finding["file"] = file
@@ -131,7 +131,7 @@ def cmd_review(args) -> int:
   if args.agent != review.AUTO and args.agent not in found and args.agent not in kinds and Path(args.agent).exists():
     args.paths, args.agent = [args.agent, *args.paths], review.AUTO
 
-  if args.recheck and args.commit: return fail("--recheck reads the ledger and --commit reads a commit; use one", 2)
+  if args.recheck and args.commit: return fail("--recheck reads the reviews and --commit reads a commit; use one", 2)
   if args.recheck or args.commit:
     root = git.root(Path.cwd()) or Path.cwd()
     touched = git.run(root, "diff-tree", "--no-commit-id", "--name-only", "-z", "-r", "--root", args.commit) if args.commit else None
@@ -152,6 +152,7 @@ def cmd_review(args) -> int:
   exclude += args.exclude or []
   jobs = args.jobs or settings["jobs"]
   limit = args.limit if args.limit is not None else settings["limit"]
+  if limit < 0: return fail("--limit is how many files each reviewer takes, or 0 for all of them", 2)
 
   # `auto` reads the config, a kind is every agent of that kind, any other name that agent
   names = [] if args.recheck else list(settings.get("agents") or []) if args.agent == review.AUTO else kinds.get(args.agent) or [args.agent]
@@ -309,13 +310,13 @@ def cmd_close(args) -> int:
   return fail(f"nothing open at {', '.join(missed)}; `agent sub reviews --open` lists what is") if missed else 0
 
 
-@command("import", help="copy what another ledger closed as wrong or wontfix into this one, such as a worktree's", group="sub")
-@arg("ledger", help="the other ledger file, as `<checkout>/.agents/.reviews/reviews.duckdb`")
+@command("import", help="copy what another checkout's reviews closed as wrong or wontfix into this one's, such as a worktree's", group="sub")
+@arg("reviews", help="the other reviews file, as `<checkout>/.agents/.reviews/reviews.duckdb`")
 @arg("--root", help="the repo to copy into (default: here)")
 def cmd_import(args) -> int:
-  if not Path(args.ledger).is_file(): return fail(f"no such ledger: {args.ledger}", 2)
+  if not Path(args.reviews).is_file(): return fail(f"no such reviews file: {args.reviews}", 2)
   root = _repo(args.root)
-  added, already = reviews.adopt(Path(args.ledger), root)
+  added, already = reviews.adopt(Path(args.reviews), root)
   for closure in added:
     line(f"added {closure['file']}:{reviews.first_line(closure['line'])} as {closure['verdict']}  {' '.join(closure['issue'].split())[:70]}")
   return done(f"{len(added)} dismissal{'' if len(added) == 1 else 's'} added to {reviews.path(root, create=False)}" + (f", {already} already there" if already else ""))

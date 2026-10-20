@@ -114,13 +114,13 @@ def fresh(installed, machine, tmp_path):
 
 
 @pytest.fixture
-def ledger(tmp_path) -> Path:
-  """A repo with no notes, for the review ledger, which only needs a root to be relative to."""
+def reviewable_repo(tmp_path) -> Path:
+  """A repo with no notes, where reviews are kept, which only needs a root to be relative to."""
   pytest.importorskip("duckdb")
   return git(tmp_path)
 
 
-# -- review fixtures: a backend that answers from a list, and the ledger records a review leaves --
+# -- review fixtures: a backend that answers from a list, and the records a review leaves --
 CLEAN = {"kind": "findings", "state": "completed", "body": "looked", "data": {"findings": []}}
 
 

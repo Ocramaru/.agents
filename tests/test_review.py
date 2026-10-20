@@ -93,21 +93,21 @@ def test_a_reply_is_read_wherever_its_object_sits_and_a_turn_keeps_its_role_and_
   assert len(backend.shown) == 1
 
 
-def test_a_conversation_continues_from_the_ledger_and_only_a_verdict_replaces_its_findings(ledger, monkeypatch):
+def test_a_conversation_continues_from_the_reviews_and_only_a_verdict_replaces_its_findings(reviewable_repo, monkeypatch):
   """A reply carries the file's current text, and an answer or a failed recheck leaves findings open."""
-  source, = put(ledger, "mod.py", text="x = 1  # BEFORE\n")
+  source, = put(reviewable_repo, "mod.py", text="x = 1  # BEFORE\n")
   backend = Stub(findings({"line": 1, "issue": "no author line", "fix": "add it"}), {"kind": "answer", "state": "completed", "body": "I would test add(2, 3) first."}, {"kind": "note", "state": "failed", "body": "timed out"})
   monkeypatch.setattr(backends, "get", lambda *args, **kwargs: backend)
-  monkeypatch.chdir(ledger)
+  monkeypatch.chdir(reviewable_repo)
   assert cli.main(["sub", "run", "file-review", "mod.py", "--task", "talk", "--backend", "stub", "--tier", "code"]) == 0
-  assert (kept := reviews.latest("talk", ledger))["file"] == "mod.py" and kept["run"] and len(kept["messages"]) == 2
+  assert (kept := reviews.latest("talk", reviewable_repo))["file"] == "mod.py" and kept["run"] and len(kept["messages"]) == 2
 
-  still = lambda: [finding["issue"] for finding in reviews.open_findings(ledger)]
-  reply = lambda task, text: cli.main(["sub", "reply", task, text, "--root", str(ledger)])
+  still = lambda: [finding["issue"] for finding in reviews.open_findings(reviewable_repo)]
+  reply = lambda task, text: cli.main(["sub", "reply", task, text, "--root", str(reviewable_repo)])
   assert still() == ["no author line"]
   source.write_text("x = 2  # AFTER\n")
   reply("talk", "what would you test first?")
-  assert len(reviews.latest("talk", ledger)["messages"]) == 4   # the same conversation, continued
+  assert len(reviews.latest("talk", reviewable_repo)["messages"]) == 4   # the same conversation, continued
   assert [role for role, _ in backend.asked] == ["code", "code"]   # the reply ran on the role the review stored, which the table still calls tier
   assert "AFTER" in backend.shown[-1] and "BEFORE" not in backend.shown[-1].split("what would you test first?", 1)[1]
   assert still() == ["no author line"]   # an answer is not a verdict
@@ -164,18 +164,18 @@ def test_a_review_reads_the_files_git_lists_filtered_by_path_and_by_what_the_sta
   assert chosen(["a.py", "logo.png"], explicit=False) == ["a.py"]
 
 
-def test_an_agent_has_one_kind_and_a_model_role_every_backend_declares_and_a_file_goes_to_the_variant_made_for_it(ledger, tmp_path, monkeypatch):
+def test_an_agent_has_one_kind_and_a_model_role_every_backend_declares_and_a_file_goes_to_the_variant_made_for_it(reviewable_repo, tmp_path, monkeypatch):
   """Every agent belongs to one kind and names a declared model role, and asking for a kind sends each file to its variant."""
   found = ag.definitions()
   kinds = ag.kinds(found)
   assert sorted(name for group in kinds.values() for name in group) == sorted(found)   # every agent, once
   with pytest.raises(SystemExit, match="file-review.*agent sub agents"): ag.definition("nonesuch", found)   # names the agents, and where the kinds are
 
-  put(ledger, ".agents/learned.md", ".agents/learned/traps.md", ".agents/context.md", text="---\nname: x\nkind: learned\n---\n\nx\n")
-  put(ledger, "README.md", "mod.py")
-  subprocess.run(["git", "add", "-A"], cwd=ledger, check=True)   # discovery reads what git tracks
-  relative = lambda plans: {name: sorted(path.relative_to(ledger).as_posix() for path in selected) for name, selected in plans}
-  assert relative(review.plan(kinds["refine"], found, [], review.discover(ledger, [], 200_000), {})) == {"refine": [".agents/context.md", "README.md"], "refine.learned": [".agents/learned.md", ".agents/learned/traps.md"]}
+  put(reviewable_repo, ".agents/learned.md", ".agents/learned/traps.md", ".agents/context.md", text="---\nname: x\nkind: learned\n---\n\nx\n")
+  put(reviewable_repo, "README.md", "mod.py")
+  subprocess.run(["git", "add", "-A"], cwd=reviewable_repo, check=True)   # discovery reads what git tracks
+  relative = lambda plans: {name: sorted(path.relative_to(reviewable_repo).as_posix() for path in selected) for name, selected in plans}
+  assert relative(review.plan(kinds["refine"], found, [], review.discover(reviewable_repo, [], 200_000), {})) == {"refine": [".agents/context.md", "README.md"], "refine.learned": [".agents/learned.md", ".agents/learned/traps.md"]}
   assert review.variant("refine", "default", kinds) == "refine"
   assert review.variant("refine", "learned", kinds) == "refine.learned"
   with pytest.raises(ValueError, match="default, learned"): review.variant("refine", "todo", kinds)

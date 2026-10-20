@@ -57,7 +57,7 @@ def draft(title: str, body: str, working_directory: Path, repository: str, dry: 
 
   if context:   # issues on .agents are public, and a hostname or a private repo's name is not theirs
     root = git.root(working_directory)
-    foot += f" · met in {root.name if root else working_directory} · {socket.gethostname()}"
+    foot += f" · met in {(root or working_directory).name} · {socket.gethostname()}"   # a folder's name only: its full path names the person's home
   full = f"{body.strip()}\n\n---\n{foot}" if body.strip() else foot
 
   found = open_issues(repository)

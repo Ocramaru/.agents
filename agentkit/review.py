@@ -135,7 +135,7 @@ def recheck(text: str, root: Path, relative: str) -> str:
 
 
 def task_id(agent: str, root: Path, relative: str) -> str:
-  """A conversation's id within its repo's ledger: one per reviewer and file."""
+  """A conversation's id within its repo's reviews: one per reviewer and file."""
   return f"review-{agent}-{Path(root).name}-{relative.replace('/', '_').strip('_')}"
 
 
@@ -176,7 +176,7 @@ def file(agent: str, backend: Backend, path: Path, definition, role: str, root: 
 
   message = session.send(agent, backend, body, instructions=instructions, role=role, effort=effort)
   found = findings(message.data)
-  # assigned, not setdefault: the file is known here, and a path the model echoes may match nothing in the ledger
+  # assigned, not setdefault: the file is known here, and a path the model echoes may match nothing in the reviews
   for finding in found: finding["file"] = relative
 
   return ({"file": relative, "agent": agent, "task": session.task, "state": message.state, "kind": message.kind,
@@ -210,5 +210,5 @@ def run(agent: str, backend: Backend, paths: list[Path], root: Path, definition,
                           "body": f"{type(error).__name__}: {error}", "findings": []}, None   # named, so the report says which file failed
       results.append(result)
       if on_done: on_done(result)
-      if record: put(record)   # after the result is reported, so a ledger failure does not replace it; a verdict that still stands is already in the ledger
+      if record: put(record)   # after the result is reported, so a failure writing the reviews does not replace it; a verdict that still stands is already in the reviews
   return results

@@ -58,7 +58,7 @@ def test_the_profile_its_remote_and_where_each_standard_comes_from(tmp_path):
   assert shown["profile"] == [str(mine), f"remote {bare}", "1 commit not pushed"]
   assert shown["standards"] == [f"{len(list((REPO / 'standards').glob('*.md'))) - 1} bundled, 2 profile, 2 repo"]
   assert shown["notes"] == ["2 on the path from here: ., pkg"]
-  assert shown["findings"] == [f"none: no review ledger in {repo.resolve()}"]
+  assert shown["findings"] == [f"none: no reviews in {repo.resolve()}"]
 
 
 def test_the_default_backend_its_models_and_the_role_each_reviewer_asks_for(tmp_path, monkeypatch):
@@ -89,15 +89,15 @@ def test_the_hooks_claude_and_git_run_and_the_errors_they_logged_since_agents_ch
   assert described(agent(["status"], cwd=tmp_path).stdout)["git hooks"] == ["core.hooksPath unset, so each repo runs only its own .git/hooks"]
 
 
-def test_open_findings_are_counted_in_the_repo_here(ledger):
-  """Every open finding in the ledger of the repo holding the working directory, and how many files they are in."""
-  put(ledger, "mod.py")
-  reviews.write(record(ledger, "t", "mod.py", [{"line": 1, "issue": "first"}, {"line": 2, "issue": "second"}]), ledger)
-  assert described(agent(["status"], cwd=ledger).stdout)["findings"] == [f"2 open in 1 file of {ledger.resolve()}; `agent sub reviews --open` lists them"]
+def test_open_findings_are_counted_in_the_repo_here(reviewable_repo):
+  """Every open finding in the reviews of the repo holding the working directory, and how many files they are in."""
+  put(reviewable_repo, "mod.py")
+  reviews.write(record(reviewable_repo, "t", "mod.py", [{"line": 1, "issue": "first"}, {"line": 2, "issue": "second"}]), reviewable_repo)
+  assert described(agent(["status"], cwd=reviewable_repo).stdout)["findings"] == [f"2 open in 1 file of {reviewable_repo.resolve()}; `agent sub reviews --open` lists them"]
 
 
 def test_a_broken_part_is_described_and_the_rest_still_show(tmp_path, monkeypatch):
-  """Unparseable settings.json or agents.toml, and a ledger with no duckdb to read it, each describe themselves; status still exits 0."""
+  """Unparseable settings.json or agents.toml, and reviews with no duckdb to read them, each describe themselves; status still exits 0."""
   repo = git(tmp_path / "repo")
   (note(repo) / "agents.toml").write_text("inject = \n")
   put(repo, ".agents/.reviews/reviews.duckdb", text="")
@@ -106,7 +106,7 @@ def test_a_broken_part_is_described_and_the_rest_still_show(tmp_path, monkeypatc
   shown = described(agent(["status"], cwd=repo, env={"CLAUDE_CONFIG_DIR": str(tmp_path / "claude")}).stdout)
   assert shown["claude hooks"][0].startswith(f"unknown: {tmp_path / 'claude' / 'settings.json'} is not valid JSON")
   assert shown["standards"][0].startswith("cannot be read, TOMLDecodeError: ") and shown["agentkit"] and shown["hook errors"]
-  assert shown["findings"][0].startswith("cannot be read, ")   # an empty file where the ledger goes
+  assert shown["findings"][0].startswith("cannot be read, ")   # an empty file where the reviews go
 
   monkeypatch.setitem(sys.modules, "duckdb", None)   # what importing it does where it is not installed
   monkeypatch.chdir(repo)

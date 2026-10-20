@@ -1,6 +1,6 @@
 """A resumable conversation with a subagent, capped by turns. States are A2A's, so `input-required` means it asked.
 `send()` takes one new message and the session, not the caller, chooses between a resume and a replay.
-The review ledger stores every conversation, so a session holds nothing on disk.
+The reviews store every conversation, so a session holds nothing on disk.
 
 Author: Marco Cassar (@Ocramaru)
 """

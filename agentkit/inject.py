@@ -81,12 +81,12 @@ def mark(session: str, keys: list[Path | str]) -> None:
 
 def open_findings(path: Path) -> list[dict]:
   """What the newest review of this file still reports.
-  It returns nothing rather than fail an edit, and checks for the ledger first so an unreviewed repo never imports duckdb."""
+  It returns nothing rather than fail an edit, and checks for the repo's reviews first so an unreviewed repo never imports duckdb."""
   path = Path(path).resolve()
   root = git.root(path.parent) or path.parent
 
   try:
     from agentkit import reviews
-    if not reviews.path(root, create=False).is_file() or not path.is_relative_to(root): return []   # outside its repo, nothing in the ledger can name it
+    if not reviews.path(root, create=False).is_file() or not path.is_relative_to(root): return []   # outside its repo, nothing in the reviews can name it
     return [finding for finding in reviews.open_findings(root) if finding.get("file") == path.relative_to(root).as_posix()]
   except Exception: return []   # noqa: BLE001 -- enrichment must never block an edit

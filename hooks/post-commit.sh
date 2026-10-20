@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Review what the commit just made touched, detached, into this repo's ledger.
+# Review what the commit just made touched, detached, into this repo's reviews.
 #
 # A commit must never wait on a model, so this returns immediately and the findings turn up in
 # `agent sub reviews --open` when they land. Installed per repo by `agent hook install`, which writes

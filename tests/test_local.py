@@ -72,7 +72,7 @@ def test_a_local_agents_toml_is_the_last_config_layer(repo):
   assert settings["exclude"][-2:] == ["docs/*", "scratch/*"] and settings["jobs"] == 1 and config.section("guard", repo)["enabled"] is False
 
 
-def test_init_ignores_the_local_notes_and_the_review_ledger_and_tops_up_an_old_ignore(tmp_path):
+def test_init_ignores_the_local_notes_and_the_reviews_and_tops_up_an_old_ignore(tmp_path):
   """A new `.agents` gets both ignore lines; an old one holding only `.reviews/` keeps its lines and gains `.local/`, once."""
   fresh = git(tmp_path / "fresh")
   assert ".gitignore" in tree.init(fresh)["added"] and (fresh / ".agents" / ".gitignore").read_text() == ".reviews/\n.local/\n"
