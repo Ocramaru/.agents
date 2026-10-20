@@ -7,6 +7,8 @@
 # gate_skip <hook> <path> <session>         0 = the answer is known and empty, so skip
 # gate_mark <hook> <path> <session> [dep]   remember it, until `dep` is newer than now
 # gate_ledger <path>                        sets GATE_LEDGER: the reviews db that could change it
+#
+# Author: Marco Cassar (@Ocramaru)
 
 _gate_stamp() {  # sets GATE_STAMP, a filename from the path without hashing it
   local flat="${2//\//_}"
@@ -19,10 +21,10 @@ gate_skip() {
   # A note is never gated: the todo.md check is about the edit in hand, not about context.
   case "$2" in */.agents/*.md) return 1 ;; esac
   _gate_stamp "$1" "$2" "$3"
-  [ -f "$GATE_STAMP" ] || return 1
-  local dep=""
-  read -r dep < "$GATE_STAMP" 2>/dev/null || true
-  [ -n "$dep" ] && [ -e "$dep" ] && [ "$dep" -nt "$GATE_STAMP" ] && return 1
+  [[ -f "$GATE_STAMP" ]] || return 1
+  local dependency=""
+  read -r dependency < "$GATE_STAMP" 2>/dev/null || true
+  [[ -n "$dependency" && -e "$dependency" && "$dependency" -nt "$GATE_STAMP" ]] && return 1
   return 0
 }
 
@@ -33,10 +35,11 @@ gate_mark() {
 }
 
 gate_ledger() {  # walks up to the nearest .agents, so no fork to git
-  local d="${1%/*}"
+  local directory="${1%/*}"
   GATE_LEDGER=""
-  while [ -n "$d" ] && [ "$d" != "/" ]; do
-    [ -d "$d/.agents" ] && { GATE_LEDGER="$d/.agents/.reviews/reviews.duckdb"; return 0; }
-    d="${d%/*}"
+  while [[ -n "$directory" && "$directory" != "/" ]]; do
+    [[ -d "$directory/.agents" ]] && { GATE_LEDGER="$directory/.agents/.reviews/reviews.duckdb"; return 0; }
+    [[ "$directory" == */* ]] || return 0   # a relative path's last part, which stripping would never shorten
+    directory="${directory%/*}"
   done
 }

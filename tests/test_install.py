@@ -106,7 +106,7 @@ def test_an_installed_package_reads_its_own_copy_and_keeps_state_in_home(tmp_pat
 
 def test_the_wheel_carries_the_package_and_every_shipped_file_and_nothing_of_this_machine(wheel):
   """The wheel holds agentkit, the hub's tracked files under agentkit/shipped with the hooks executable, and the `agent` entry point."""
-  tracked = subprocess.run(["git", "ls-files", "agentkit", "AGENTS.md", "agents", "commands", "config.toml", "githooks", "hooks", "settings.hooks.json", "standards", "templates"], cwd=REPO, capture_output=True, check=True, text=True).stdout.split()
+  tracked = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard", "agentkit", "AGENTS.md", "agents", "commands", "config.toml", "githooks", "hooks", "settings.hooks.json", "standards", "templates"], cwd=REPO, capture_output=True, check=True, text=True).stdout.split()
   with zipfile.ZipFile(wheel) as archive:
     modes = {info.filename: info.external_attr >> 16 for info in archive.infolist() if not info.filename.startswith("agentkit-")}
     entry_points = archive.read(next(name for name in archive.namelist() if name.endswith(".dist-info/entry_points.txt"))).decode()
@@ -206,7 +206,7 @@ def test_install_asks_for_a_profile_once_and_only_at_a_terminal_with_gh_logged_i
   (home / ".claude").mkdir(parents=True)
   quiet = fresh(["install"]).stdout
   assert "profile [new]" not in quiet and "No profile chosen" in quiet and not (home / ".agents" / "local.toml").exists()
-  code, shown = typed([str(installed / "agent"), "install"], "", machine, tmp_path)
+  code, shown = typed([str(installed / "agent"), "install", "--backend", "claude"], "", machine, tmp_path)
   assert code == 0 and "profile [new]" not in shown and "No profile chosen" in shown   # no gh yet, so the question waits
 
   fake.mkdir()
@@ -214,7 +214,7 @@ def test_install_asks_for_a_profile_once_and_only_at_a_terminal_with_gh_logged_i
   (fake / "gh").chmod(0o755)
   machine.update({"PATH": f"{fake}{os.pathsep}{machine['PATH']}", "GH_LOG": str(tmp_path / "gh.log")})
 
-  code, shown = typed([str(installed / "agent"), "install"], "none\n", machine, tmp_path)
+  code, shown = typed([str(installed / "agent"), "install", "--backend", "claude"], "none\n", machine, tmp_path)
   assert code == 0 and "profile [new]:" in shown and tomllib.loads((home / ".agents" / "local.toml").read_text())["profile"]["path"] == ""
   code, shown = typed([str(installed / "agent"), "install"], "", machine, tmp_path)
   assert code == 0 and "profile [new]" not in shown and "No profile chosen" not in shown
@@ -228,7 +228,7 @@ def test_every_profile_answer_works_from_the_flag_at_a_terminal_or_not(fresh, in
   for command in (["git", "init", "-q", "--bare", "-b", "main", str(bare)], ["git", "clone", "-q", str(bare), str(clone)], ["git", "-C", str(clone), "commit", "-q", "--allow-empty", "-m", "first"], ["git", "-C", str(clone), "push", "-q", "origin", "main"]): subprocess.run(command, capture_output=True, check=True, env=machine)
   chosen = lambda: tomllib.loads((home / ".agents" / "local.toml").read_text())["profile"]["path"]
 
-  code, shown = typed([str(installed / "agent"), "install", "--profile", str(bare)], "", machine, tmp_path)
+  code, shown = typed([str(installed / "agent"), "install", "--profile", str(bare), "--backend", "claude"], "", machine, tmp_path)
   assert code == 0 and "profile [new]" not in shown and (home / ".agents" / "profile" / ".git").is_dir() and chosen() == str((home / ".agents" / "profile").resolve())
   fresh(["install", "--profile", str(directory)])
   assert chosen() == str(directory.resolve())
@@ -249,10 +249,10 @@ def test_a_new_profile_is_made_and_published_privately_through_gh_only_when_aske
   said = fresh(["install", "--profile", "new"]).stdout
   assert "a first commit" in said and f"git -C {made} push -u origin main" in said and "Make tester" not in said and (made / "standards").is_dir()
   assert "repo create" not in (tmp_path / "gh.log").read_text()   # no terminal, so never asked
-  code, shown = typed([str(installed / "agent"), "install", "--profile", "new"], "\n", machine, tmp_path)
+  code, shown = typed([str(installed / "agent"), "install", "--profile", "new", "--backend", "claude"], "\n", machine, tmp_path)
   assert code == 0 and "Make tester/.agents.profile on GitHub, private" in shown and "repo create" not in (tmp_path / "gh.log").read_text()   # the default is no
 
-  code, shown = typed([str(installed / "agent"), "install", "--profile", "new"], "y\n", machine, tmp_path)
+  code, shown = typed([str(installed / "agent"), "install", "--profile", "new", "--backend", "claude"], "y\n", machine, tmp_path)
   assert code == 0 and "made  tester/.agents.profile, private, and pushed" in shown and "push -u origin main" not in shown
   assert f"repo create tester/.agents.profile --private --source {made} --remote origin --push" in (tmp_path / "gh.log").read_text()
   assert subprocess.run(["git", "-C", str(made), "status", "-sb"], capture_output=True, check=True, text=True).stdout.startswith("## main...origin/main\n")
@@ -268,6 +268,48 @@ def test_a_profile_url_that_cannot_be_reached_stops_the_install_before_it_change
   assert not (home / ".agents").exists() and list((home / ".claude").iterdir()) == []
 
 
+def test_install_sets_the_backend_from_the_flag_or_asks_once_at_a_terminal(fresh, installed, machine, tmp_path):
+  """An unknown --backend is refused before anything is written; with no terminal install only says how, at one it lists each backend as here or how to install it, and the answer lands in local.toml, or the profile once there is one."""
+  home, fake = Path(machine["HOME"]), tmp_path / "fake"
+  (home / ".claude").mkdir(parents=True)
+  fake.mkdir()
+  (fake / "codex").write_text("#!/usr/bin/env bash\n")
+  (fake / "codex").chmod(0o755)
+  machine["PATH"] = f"{fake}{os.pathsep}{machine['PATH']}"
+  default = lambda where: tomllib.loads(where.read_text()).get("backends", {}).get("default") if where.is_file() else None
+
+  assert "there is no backend called nonesuch" in fresh(["install", "--backend", "nonesuch"], expect=2).stderr and not (home / ".agents").exists()
+  assert "No backend: `agent install --backend <claude|codex|ollama>`" in fresh(["install"]).stdout and default(home / ".agents" / "local.toml") is None
+  assert "FAIL  a default backend is set" in fresh(["doctor"], expect=1).stdout
+
+  code, shown = typed([str(installed / "agent"), "install", "--profile", "none"], "ollama\n", machine, tmp_path)
+  assert code == 0 and f"codex    OpenAI Codex CLI       found at {fake / 'codex'}" in shown and "Reviews run on a model" in shown
+  assert default(home / ".agents" / "local.toml") == "ollama"
+  code, shown = typed([str(installed / "agent"), "install"], "", machine, tmp_path)
+  assert code == 0 and "Reviews run on a model" not in shown   # asked once
+
+  fresh(["install", "--profile", "new", "--backend", "codex"])
+  assert default(home / ".agents" / "profile" / "config.toml") == "codex"
+
+
+def test_a_review_with_no_backend_says_how_without_a_terminal_and_offers_the_question_at_one(fresh, installed, machine, tmp_path):
+  """With no default, a review run unattended stops and names the fix, writing nothing; at a terminal it asks, and a yes runs the install's question."""
+  home, here = Path(machine["HOME"]), tmp_path / "elsewhere"
+  subprocess.run(["git", "init", "-q", str(here)], check=True)
+  (here / "x.py").write_text("x = 1\n")
+  (home / ".agents").mkdir(parents=True)
+  (home / ".agents" / "local.toml").write_text('[profile]\npath = ""\n\n[backends.echo]\nlabel = "Echo"\nkind = "cli"\nargv = ["true"]\nmodels = { text = "x", code-large = "x" }\n')
+  default = lambda: tomllib.loads((home / ".agents" / "local.toml").read_text()).get("backends", {}).get("default")
+
+  stopped = fresh(["sub", "review", "x.py"], expect=2).stderr
+  assert "no default backend is set" in stopped and "agent install --backend <" in stopped and default() is None
+  code, shown = typed([str(installed / "agent"), "sub", "review", "x.py"], "n\n", machine, here)
+  assert code == 2 and "Set one now? [Y/n]" in shown and default() is None
+
+  code, shown = typed([str(installed / "agent"), "sub", "run", "doc-check", "x.py"], "y\necho\n", machine, here)
+  assert code != -signal.SIGKILL and "echo     Echo" in shown and "found at" in shown and default() == "echo"
+
+
 def test_the_global_hook_turns_on_and_off_but_never_replaces_someone_elses(home):
   """Install and uninstall set and unset core.hooksPath idempotently, and neither touches a path that is not ours."""
   assert install.global_install()[0] == 0
@@ -279,6 +321,13 @@ def test_the_global_hook_turns_on_and_off_but_never_replaces_someone_elses(home)
   code, message = install.global_install()
   assert code == 1 and "Not replacing" in message
   assert install.global_hooks_path() == "/somewhere/else"
+
+
+def test_the_global_hook_is_refused_when_there_are_no_hooks_to_point_at(home, tmp_path, monkeypatch):
+  """With the hooks directory missing, the global install says how to get it and leaves git's config alone."""
+  monkeypatch.setattr(install, "GITHOOKS", tmp_path / "nowhere")
+  code, message = install.global_install()
+  assert code == 1 and "run `agent install` first" in message and install.global_hooks_path() == ""
 
 
 def test_a_commit_runs_the_repos_own_hook_first_and_is_reviewed_only_where_a_note_says_so(home, tmp_path):

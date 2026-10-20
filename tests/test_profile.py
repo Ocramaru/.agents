@@ -48,6 +48,9 @@ def test_the_profile_is_found_from_the_environment_then_local_toml_then_the_defa
   """The environment wins over local.toml, which wins over the default; empty means none, and a broken local.toml is none."""
   profile.LOCAL.write_text("[profile\npath = ")
   assert profile.path() is None
+  for wrong in ('profile = "/saved"\n', "[profile]\npath = 3\n"):   # parses, but is not a [profile] table with a path
+    profile.LOCAL.write_text(wrong)
+    assert profile.chosen() is None and profile.path() is None
 
   profile.DEFAULT.mkdir(parents=True)
   assert profile.path() == profile.DEFAULT
@@ -89,14 +92,14 @@ def test_a_profile_replaces_the_hubs_standards_reviewers_and_backends_by_name_an
   assert agents.definition("file-review", definitions).body.strip() == "MINE"
 
   (hub / "config.toml").write_text('[review]\nexclude = ["**/vendor/**"]\njobs = 4\n[backends]\ndefault = "claude"\n[backends.claude]\nkind = "cli"\nargv = ["claude"]\nmodels = { text = "hub-model" }\n[backends.ollama]\nkind = "http"\nurl = "x"\n')
-  (mine / "config.toml").write_text('[review]\nexclude = ["**/data/**"]\njobs = 2\n[backends]\ndefault = "ollama"\n[backends.claude]\nkind = "cli"\nargv = ["claude"]\nmodels = { text = "my-model" }\n')
+  (mine / "config.toml").write_text('[review]\nexclude = "**/data/**"\njobs = 2\n[backends]\ndefault = "ollama"\n[backends.claude]\nkind = "cli"\nargv = ["claude"]\nmodels = { text = "my-model" }\n')
   monkeypatch.setattr(profile, "CONFIG", hub / "config.toml")
   known, default = backends.load_backends()
   assert default == "ollama" and set(known) == {"claude", "ollama"}
   assert known["claude"].spec["models"]["text"] == "my-model"
 
   config = profile.section("review", add=("exclude",))
-  assert config["exclude"] == ["**/vendor/**", "**/data/**"] and config["jobs"] == 2
+  assert config["exclude"] == ["**/vendor/**", "**/data/**"] and config["jobs"] == 2   # a lone string accumulates as a list of one
 
 
 def test_the_pointer_to_your_profile_follows_the_hubs_and_moves_with_the_profile(isolated, monkeypatch):
@@ -122,6 +125,17 @@ def test_the_pointer_to_your_profile_follows_the_hubs_and_moves_with_the_profile
   assert claude.read_text() == text.replace(f"@{first}/", f"@{second}/")
 
 
+def test_dropping_the_profile_drops_its_pointers_whole_line(isolated, monkeypatch):
+  """With no profile left, repointing removes each line that is only the old pointer, whatever whitespace surrounds it, and nothing else."""
+  monkeypatch.setenv("HOME", str(isolated / "home"))
+  monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+  monkeypatch.setenv("AGENTS_PROFILE", "")
+  (claude := isolated / "home" / ".claude" / "CLAUDE.md").parent.mkdir(parents=True)
+  claude.write_text(f"my notes\n@{install.HOME}/AGENTS.md\n  @{isolated}/old/AGENTS.md \nafter\n")
+  assert install.repoint(isolated / "old" / "AGENTS.md") == ["point .claude/CLAUDE.md at no profile"]
+  assert claude.read_text() == f"my notes\n@{install.HOME}/AGENTS.md\nafter\n"
+
+
 def test_a_profile_is_adopted_checked_for_drift_updated_and_made(isolated, monkeypatch, capsys):
   """A directory is used in place, a remote is cloned once and never over a different one, drift names what is unpushed, update fails rather than merge, and init reports only what it made."""
   mine = isolated / "dotfiles"
@@ -139,6 +153,8 @@ def test_a_profile_is_adopted_checked_for_drift_updated_and_made(isolated, monke
   commit(clone, "second")
   (clone / "voice.md").write_text("new\n")
   assert profile.drift(clone) == ["1 uncommitted change", "1 commit not pushed"]
+  profile.git(clone, "update-ref", "-d", "refs/remotes/origin/main")   # an upstream set but not fetched is not no upstream
+  assert profile.drift(clone) == ["1 uncommitted change", "its upstream origin/main is gone, or was never fetched"]
 
   monkeypatch.setattr(profile, "SHIPPED", published(isolated, "agents")[1])
   profile.git(clone, "push", "-q")
@@ -181,3 +197,11 @@ def test_doctor_fails_a_public_profile_remote_and_profile_names_a_missing_one(is
     monkeypatch.setenv("GH_PRIVATE", private)
     assert [passed for passed, label, _ in doctor.checks() if label == "profile remote someone/.agents.profile is private"] == [private == "true"]
   assert "repo view someone/.agents.profile --json isPrivate" in (isolated / "gh.log").read_text()
+
+
+def test_a_key_is_written_into_its_table_even_when_the_header_ends_the_file(tmp_path):
+  """A [table] header on the last line with no newline is found and filled, never added a second time, which TOML refuses."""
+  config = tmp_path / "config.toml"
+  config.write_text("[review]\njobs = 2\n\n[backends]")
+  profile.write(config, "backends", "default", "claude")
+  assert tomllib.loads(config.read_text()) == {"review": {"jobs": 2}, "backends": {"default": "claude"}}

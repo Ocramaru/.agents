@@ -83,8 +83,8 @@ def repoint(old: Path | None) -> list[str]:
   for target, name in INSTRUCTIONS.items():
     file = config_dir(target) / name
     if not file.is_file() or f"@{old}" not in (text := file.read_text(encoding="utf-8")): continue
-    file.write_text(text.replace(f"@{old}\n", f"@{new}\n" if new else "").replace(f"@{old}", f"@{new}" if new else ""),
-                    encoding="utf-8")
+    # line by line, so a dropped pointer takes its whole line, whatever whitespace it had
+    file.write_text("".join(line.replace(f"@{old}", f"@{new}" if new else "") for line in text.splitlines(keepends=True) if new or line.strip() != f"@{old}"), encoding="utf-8")
     out.append(f"point {home(file)} at {home(new) if new else 'no profile'}")
   return out
 
@@ -242,6 +242,7 @@ def global_install() -> tuple[int, str]:
     return 1, (f"core.hooksPath is already {current}. Not replacing it: every repo's hooks run "
                "from there. Unset it yourself if it is stale, then run this again.")
 
+  if not GITHOOKS.is_dir(): return 1, f"no hooks at {home(GITHOOKS)} to point git at; run `agent install` first"
   for hook in GITHOOKS.iterdir(): hook.chmod(hook.stat().st_mode | 0o111)   # every time: a checkout can drop +x
   if current: return 0, f"ok    core.hooksPath is {GITHOOKS}"
   subprocess.run(["git", "config", "--global", "core.hooksPath", str(GITHOOKS)], check=True)

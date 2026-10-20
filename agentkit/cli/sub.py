@@ -16,6 +16,7 @@ from pathlib import Path
 from agentkit import agents, backends, hooks, profile, review, reviews, tree
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli import show
+from agentkit.cli.setup import settle
 from agentkit.cli.out import done, dump, escape, fail, line, note, say, table, took
 from agentkit.session import Session
 from agentkit.standards import Library
@@ -71,6 +72,7 @@ def cmd_run(args) -> int:
   task = args.task or f"{args.agent}-{hashlib.sha1(body.encode()).hexdigest()[:8]}"
   conversation = reviews.conversation(reviews.latest(task, root)) or Session(task)
 
+  if (code := settle(args.backend)): return code
   backend, tier = backends.get(args.backend), args.tier or definition.get("model")
   if (code := _missing_model(args, backend, [tier])): return code
   # one file is about that file, so it is reviewed and rechecked as one; several, or a diff, are not
@@ -202,6 +204,7 @@ def cmd_review(args) -> int:
     return 0
 
   if exclude and roots: note(f"excluding {', '.join(exclude)}")  # only discovery honours them
+  if (code := settle(args.backend or config.get("backend"))): return code
   backend = backends.get(args.backend or config.get("backend"))   # a repo may keep its reviews local
   if (code := _missing_model(args, backend, {args.tier or agents.definition(name, found).get("model") for name, _ in plans})): return code
 
@@ -212,7 +215,7 @@ def cmd_review(args) -> int:
        + (f", {at_once} at a time" if at_once > 1 else ""))
 
   began = time.monotonic()
-  return _report_review(args, root, _fan_out(plans, backend, root, jobs, args.tier, found, kind, libraries, keep=args.keep, run=run, mode="jsonl" if args.jsonl else "text", effort=args.effort, fresh=args.fresh),
+  return _report_review(root, _fan_out(plans, backend, root, jobs, args.tier, found, kind, libraries, keep=args.keep, run=run, mode="jsonl" if args.jsonl else "text", effort=args.effort, fresh=args.fresh),
                         run, time.monotonic() - began)
 
 
@@ -308,15 +311,16 @@ def cmd_close(args) -> int:
 
 @command("agents", help="the kinds of review there are, and what each reads", group="sub", default=True)
 def cmd_agents(args) -> int:
-  backend, found, standards, rows = backends.get(None), agents.definitions(), Library(), []
+  known, default = backends.load_backends()
+  backend, found, standards, rows = known.get(default), agents.definitions(), Library(), []
   for kind, names in sorted(agents.kinds(found).items()):
     for name in names:
       definition = found[name]
       role = definition.get("model")
-      rows.append([escape(kind), escape(name), f"{escape(backend.spec.get("models", {}).get(role, "none").removeprefix("claude-"))}\n[dim]{escape(role)}[/dim]", escape(", ".join(review.globs_of(definition, standards)) or "anything named"), escape((definition.get("description") or "").split(". ", 1)[-1])])   # the model that runs, not only its role
+      rows.append([escape(kind), escape(name), f"{escape((backend.spec.get("models", {}).get(role, "none") if backend else "none").removeprefix("claude-"))}\n[dim]{escape(role)}[/dim]", escape(", ".join(review.globs_of(definition, standards)) or "anything named"), escape((definition.get("description") or "").split(". ", 1)[-1])])   # the model that runs, not only its role
 
   return table(["kind", "agent", "model", "reads", "looks for"], rows,
-               title=f"Review types on {backend.name}",
+               title=f"Review types on {backend.name}" if backend else "Review types, with no default backend set",
                note="each sees one file and nothing else, has no tools, and returns {line, issue, fix}\n"
                     "agent sub review <kind | agent | auto> <files>   ·   --backend to run elsewhere",
                wide=("reads", "looks for"))
@@ -366,7 +370,7 @@ def _fan_out(plans, backend, root: Path, jobs: int, want_tier: str | None, found
       if freed: note(f"released {', '.join(backend.model_for(tier) for tier in freed)}")
 
 
-def _report_review(args, root: Path, results: list, run: str, seconds: float) -> int:
+def _report_review(root: Path, results: list, run: str, seconds: float) -> int:
   # one bucket each: subtracting overlapping counts could count a result twice or go negative
   by_bucket = {}
   for outcome in results: by_bucket.setdefault(show.outcome(outcome), []).append(outcome)

@@ -77,13 +77,14 @@ Semver, starting at the first install. Bump `version` in `pyproject.toml` and ta
 - [x] `install.sh` becomes `uv tool install ...` then `agent install`; README says so, with the clone as the dev path.
 - [x] `agent install` offers to make a profile, creates the private remote through `gh`, and takes `--profile new|URL|DIR|none`; a test runs it with no terminal and with a temp `HOME`.
 - [x] Preflight the profile URL's reachability before the install writes anything.
-- [ ] `agent status`: one read-only screen of what this machine has. The version and whether it is a clone or an install; the profile, its remote and anything unpushed; the default backend, its models and the roles each reviewer asks for; counts of standards (hub, profile, repo), reviewers and note directories on the path from here; open review findings here; whether the Claude hooks and git's `core.hooksPath` are in place; hook errors since `.agents` last changed. `doctor` judges and `status` describes, so the two never repeat each other's lines, and `agent profile` stays for the profile alone.
+- [x] `agent status`: one read-only screen of what this machine has. The version and whether it is a clone or an install; the profile, its remote and anything unpushed; the default backend, its models and the roles each reviewer asks for; counts of standards (hub, profile, repo), reviewers and note directories on the path from here; open review findings here; whether the Claude hooks and git's `core.hooksPath` are in place; hook errors since `.agents` last changed. `doctor` judges and `status` describes, so the two never repeat each other's lines, and `agent profile` stays for the profile alone.
 - [x] `doctor` warns on a public profile remote, and `agent profile` on a missing one.
-- [ ] Ask which backend this machine has on first run and write it to the profile's `config.toml`.
+- [x] Ask which backend this machine has on first run and write it to the profile's `config.toml`.
 - [ ] Tag `v0.2.0` once an install on a Mac and on this machine both pass `agent doctor`.
 
 ## Open
 
-- Whether hooks should stay shell scripts at all, or become `agent hook <name>`. The gate is shell to avoid a fork per edit, so keep them unless the console script's start time is as good.
-- Whether `~/.agents` stays the state directory name for an install, since it is also what the convention is called.
-- The no-uv fallback in `bin/agent` (plain `python3` for hooks) goes away for an install, which needs uv to exist.
+- Decided: hooks stay shell scripts. The console script starts in about 77 ms, against 12 ms for a call the gate answers; see [[settled]].
+- Decided: `~/.agents` stays the state directory for an install. Every hook, settings block, CLAUDE.md pointer and `core.hooksPath` names it, and a clone already answers there.
+- Decided: the no-uv fallback stays in `bin/agent`, which only a clone runs; an install has no `bin/agent`, and its hooks call the console script on PATH.
+- A machine whose backend differs from the profile's `default` overrides it in its own `local.toml` today. A per-machine section kept in the profile could carry that instead; later, not needed for v0.2.0.

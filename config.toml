@@ -44,10 +44,13 @@ scripts = ["make", "just", "npm run", "pnpm run", "yarn run", "yarn", "bun run"]
 inspect = ["--check", "--diff", "--list-different", "--dry-run"]
 
 # Where agents run, by name. `resume_argv` means the backend keeps its own context; without it, replay.
+# No default ships, so nothing runs on a model unasked: `agent install` asks which of these this machine has and writes
+# `default` to your profile's config.toml. `label` and `install` are what that question shows.
 [backends]
-default = "claude"
 
 [backends.claude]
+label = "Claude Code"
+install = "npm install -g @anthropic-ai/claude-code"
 kind = "cli"
 format = "json"
 # A reviewer reads what it is handed and answers. `--tools ""` is what `tools: none` in an agent
@@ -68,6 +71,8 @@ timeout = 600   # seconds per call; a review that needs longer should say so rat
 
 # --json emits an event stream: thread.started carries the handle, item.completed the message.
 [backends.codex]
+label = "OpenAI Codex CLI"
+install = "npm install -g @openai/codex"
 kind = "cli"
 format = "jsonl"
 argv = ["codex", "exec", "--json", "--skip-git-repo-check", "--model", "{model}", "{prompt}"]
@@ -80,6 +85,8 @@ models = { text = "gpt-5-mini", code = "gpt-5", code-large = "gpt-5", small = "g
 # sizes: prose judged by a coder model reads like a linter, and code judged by a general
 # small one crashes ollama swapping weights.
 [backends.ollama]
+label = "Ollama, local models"
+install = "https://ollama.com/download, then `ollama serve`"
 kind = "http"
 url = "http://localhost:11434/v1/chat/completions"
 models = { text = "qwen3:8b", text-large = "qwen2.5:14b", code-large = "qwen3-coder:30b" }

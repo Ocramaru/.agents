@@ -42,7 +42,7 @@ def chosen() -> str | None:
   """The profile this machine's local.toml records: a path, `""` for a choice of none, or None when it records no choice."""
   try: local = tomllib.loads(LOCAL.read_text(encoding="utf-8")) if LOCAL.is_file() else {}
   except tomllib.TOMLDecodeError: local = {}      # a broken local file is no profile, not a crash
-  return local.get("profile", {}).get("path")
+  return saved if isinstance(table := local.get("profile"), dict) and isinstance(saved := table.get("path"), str) else None   # nor is one of the wrong shape
 
 
 def file(name: str) -> Path | None:
@@ -57,26 +57,33 @@ def section(name: str, repo: Path | None = None, add: tuple[str, ...] = ()) -> d
   settings: dict = {}
   for layer in (CONFIG, file("config.toml"), None if os.environ.get("AGENTS_PROFILE") == "" else LOCAL, *((Path(repo) / ".agents" / "agents.toml", Path(repo) / ".agents" / ".local" / "agents.toml") if repo else ())):
     if not layer or not layer.is_file(): continue
-    for key, value in tomllib.loads(layer.read_text(encoding="utf-8")).get(name, {}).items(): settings[key] = settings.get(key, []) + value if key in add else value
+    for key, value in tomllib.loads(layer.read_text(encoding="utf-8")).get(name, {}).items(): settings[key] = settings.get(key, []) + ([value] if isinstance(value, str) else value) if key in add else value   # a lone string is a list of one
   return settings
 
 
 def save(where: Path | None) -> None:
-  """Record this machine's profile, or an empty path for none, changing only the `path` line so the rest stays as written.
+  """Record this machine's profile, or an empty path for none."""
+  write(LOCAL, "profile", "path", str(Path(where).expanduser().resolve()) if where else "")
 
-  JSON's string escaping is TOML's, so any path is quoted validly.
+
+def write(file: Path, table: str, key: str, value: str) -> None:
+  """Set `key` in `[table]` of a TOML file to a string, changing only that line so the rest stays as written; a new local.toml starts with its header.
+
+  JSON's string escaping is TOML's, so any value is quoted validly.
   """
-  line = f"path = {json.dumps(str(Path(where).expanduser().resolve()) if where else '')}"
-  text = LOCAL.read_text(encoding="utf-8") if LOCAL.is_file() else HEADER
-  table = re.search(r"(?ms)^\[profile\][ \t]*(?:#[^\n]*)?\n(.*?)(?=^\[|\Z)", text)
+  line = f"{key} = {json.dumps(value)}"
+  text = file.read_text(encoding="utf-8") if file.is_file() else HEADER if file == LOCAL else ""
+  if text and not text.endswith("\n"): text += "\n"   # a header on the last line is still a header
+  found = re.search(rf"(?ms)^\[{re.escape(table)}\][ \t]*(?:#[^\n]*)?\n(.*?)(?=^\[|\Z)", text)
 
-  if table is None: text = f"{text.rstrip()}\n\n[profile]\n{line}\n"
+  if found is None: text = f"{text.rstrip()}\n\n[{table}]\n{line}\n".lstrip("\n")
   else:
-    body = table.group(1)
-    body = (re.sub(r"(?m)^[ \t]*path\s*=.*$", lambda _: line, body, count=1) if re.search(r"(?m)^[ \t]*path\s*=", body)
+    body = found.group(1)
+    body = (re.sub(rf"(?m)^[ \t]*{re.escape(key)}\s*=.*$", lambda _: line, body, count=1) if re.search(rf"(?m)^[ \t]*{re.escape(key)}\s*=", body)
             else f"{line}\n{body}")
-    text = text[:table.start(1)] + body + text[table.end(1):]
-  LOCAL.write_text(text, encoding="utf-8")
+    text = text[:found.start(1)] + body + text[found.end(1):]
+  file.parent.mkdir(parents=True, exist_ok=True)
+  file.write_text(text, encoding="utf-8")
 
 
 HEADER = "# This machine's install. Not tracked: where your profile lives is local.\n"
@@ -127,13 +134,15 @@ def drift(where: Path) -> list[str]:
   Behind is as of the last fetch, since doctor does not fetch.
   """
   if not (where / ".git").exists(): return []
+  if (status := git(where, "status", "--porcelain=v2", "--branch")).returncode: return [f"git status failed: {status.stderr.strip().partition('\n')[0]}"]
+  branch = dict(line[2:].split(" ", 1) for line in status.stdout.splitlines() if line.startswith("# "))   # its headers, which git never translates
   out = []
-  dirty = len(git(where, "status", "--porcelain").stdout.splitlines())
+  dirty = len(status.stdout.splitlines()) - len(branch)
   if dirty: out.append(f"{dirty} uncommitted change{'s' if dirty != 1 else ''}")
 
-  counts = git(where, "rev-list", "--left-right", "--count", "@{u}...HEAD")
-  if counts.returncode: return out + ["no upstream to push to"]
-  behind, ahead = (int(count) for count in counts.stdout.split())
+  if "branch.upstream" not in branch: return out + ["no upstream to push to"]
+  if "branch.ab" not in branch: return out + [f"its upstream {branch['branch.upstream']} is gone, or was never fetched"]
+  ahead, behind = (abs(int(count)) for count in branch["branch.ab"].split())   # "+ahead -behind"
   if ahead: out.append(f"{ahead} commit{'s' if ahead != 1 else ''} not pushed")
   if behind: out.append(f"{behind} behind, as of the last fetch")
   return out

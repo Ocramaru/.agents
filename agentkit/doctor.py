@@ -9,10 +9,10 @@ import json
 import os
 import re
 import shutil
-from datetime import datetime
+import tomllib
 from pathlib import Path
 
-from agentkit import agents, backends, guard, hooks, inject, install, issue, mapblock, notes, profile, tree, version
+from agentkit import agents, backends, guard, hooks, inject, install, issue, mapblock, notes, profile, tree
 from agentkit.frontmatter import load
 from agentkit.profile import HOME, SHIPPED
 from agentkit.standards import Library
@@ -21,7 +21,7 @@ MODES = ("full", "context", "none")   # what agents.toml `inject` may say
 
 def checks() -> list[tuple[bool, str, str]]:
   """Every check as (ok, what was checked, what to do about it), roughly install-time to run-time."""
-  out = [(True, f"agentkit {version()}", "")]
+  out = []
 
   found = shutil.which("agent")
   out.append((bool(found and Path(found).resolve() == install.CLI.resolve()), f"`agent` on PATH -> {found or 'not found'}", "`uv tool update-shell` puts uv's bin on PATH; the hooks call the first `agent` there" if profile.INSTALLED else "run `agent install`, and put ~/.local/bin on PATH"))
@@ -56,13 +56,21 @@ def checks() -> list[tuple[bool, str, str]]:
 
   here = Path.cwd()
   note_dirs = tree.find_note_dirs(here)   # walked once, since over a large tree it is the slow part
+
+  # every check from here reads config, so a hand-edited file that does not parse is reported and the rest wait for it
+  broken, root = [], tree.git_root(here)
+  for file in dict.fromkeys(path for path in [profile.CONFIG, profile.file("config.toml"), profile.LOCAL, *(directory / tree.LINKS for directory in [*note_dirs, *((root / ".agents", root / ".agents" / ".local") if root else ())])] if path and path.is_file()):
+    try: tomllib.loads(file.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as error: broken.append((False, f"{file} parses as TOML", f"fix it: {error}"))
+  if broken: return out + broken
+
   for agents_dir in note_dirs:
     links = tree.toml(agents_dir)
     for name in inject.flatten_applies(links.get("applies") or {}): out.append((name in library.layers, f"{agents_dir.parent.name}/agents.toml applies -> {name}", f"no standard named {name}; check the spelling in {agents_dir / 'agents.toml'}"))
     if (mode := links.get("inject")) is not None: out.append((mode in MODES, f"{agents_dir.parent.name}/agents.toml inject = {mode!r}", f"inject must be one of {', '.join(MODES)}"))   # any other value falls through to the default unreported
 
   known, default = backends.load_backends()
-  out.append((default in known, f"default backend {default!r} exists", "fix `default` under [backends] in config.toml"))
+  out.append((default in known, f"default backend {default} is one of [backends]" if default else "a default backend is set, so reviews have somewhere to run", f"fix `default` under [backends] in config.toml; known: {', '.join(known)}" if default else "`agent install` at a terminal asks, or `agent install --backend <name>`"))
 
   roles = {definition.get("model") for definition in agents.definitions().values()}
   for name, backend in sorted(known.items()):
@@ -84,14 +92,11 @@ def checks() -> list[tuple[bool, str, str]]:
   # `agent issue` is the only channel from another repo back to the hub, so it is checked before it is needed
   out.append((bool(shutil.which("gh") and issue.gh("auth", "status").returncode == 0), "gh authenticated, so `agent issue` can reach the hub", "install gh and run `gh auth login`; without it friction with the hub has nowhere to go"))
 
-  # a crashing hook only shows in the log; one from before .agents last changed came from code that no longer runs
-  since = datetime.fromisoformat(profile.git(SHIPPED, "log", "-1", "--format=%cI").stdout.strip() or "1970-01-01T00:00:00+00:00")
-  errors = [row for row in hooks.entries() if row[3].startswith("ERROR") and datetime.fromisoformat(row[0]) > since]
+  errors = hooks.errors()   # a crashing hook only shows in the log
   out.append((not errors, "no hook errors since .agents last changed", f"{len(errors)} logged, the latest from {errors[-1][1]}: {errors[-1][4][:120]}; `agent hooks` lists them" if errors else ""))
 
   # a profile reaches other machines only once pushed, and nothing else checks that
-  if (where := profile.path()) is None: out.append((True, "no profile, so the starters in .agents are in use", ""))
-  else:
+  if (where := profile.path()) is not None:
     out.append((where.is_dir(), f"profile at {where}", "agent profile use <dir>, or fix the path in local.toml"))
     for problem in profile.drift(where) if where.is_dir() else []: out.append((False, f"profile: {problem}", "agent update" if "behind" in problem else f"commit and push in {where}, or your other machines miss it"))
 

@@ -19,6 +19,8 @@ agent install --profile git@github.com:<you>/.agents.profile.git
 
 `~/.agents` is this machine's: the profile, `local.toml` and the hook log live there, and an upgrade never touches them.
 
+It also asks what reviews run on: Claude Code, the Codex CLI or Ollama, each shown as found on this machine or with how to install it. The answer is your profile's `[backends] default`, so later machines are not asked, and `--backend <name>` gives it without a terminal. No default ships, so nothing runs on a model until one is chosen; a review started at a terminal before then offers the same question.
+
 With no arguments `agent install` wires up every agent whose config directory exists; name them to be explicit, or `--all` to create the directories. It copies the hooks, commands and `AGENTS.md` into `~/.agents`, where the agents' settings name them, checks `git` and `jq` before writing anything, and moves anything already in place to a `.bak` that never overwrites an older one. A second run reports `ok` for everything.
 
 [`install.sh`](install.sh) runs both steps, and says where to get uv if you have none: `curl -LsSf https://raw.githubusercontent.com/Ocramaru/.agents/main/install.sh | bash`. So does `uvx --from git+https://github.com/Ocramaru/.agents agent install`, which keeps `agent` installed as a uv tool once it is done.
@@ -119,11 +121,14 @@ Anything else that reads `~/.<name>/AGENTS.md` works as a generic target: `agent
 ## Checking it works
 
 ```sh
+agent status
 agent doctor
 env -u PYTHONPATH uv run pytest tests/
 ```
 
-`doctor` covers what tests cannot: whether the hooks are registered here and an install's copies of them are current, whether `agent` on PATH is this install or clone, whether a standard points at one that was renamed, whether a backend's CLI is installed, whether a note's map has drifted, and whether your profile is pushed. The suite runs only against temporary trees, so it never touches your install or your profile.
+`status` describes this machine on one screen and never fails: the version and whether it is a clone or an install, the profile and what it has not pushed, the default backend and the role each reviewer asks for, the standards and notes in force where you stand, the open findings there, and whether the hooks are wired.
+
+`doctor` judges, and covers what tests cannot: whether the hooks are registered here and an install's copies of them are current, whether `agent` on PATH is this install or clone, whether a standard points at one that was renamed, whether a backend's CLI is installed, whether a note's map has drifted, and whether your profile is pushed. The suite runs only against temporary trees, so it never touches your install or your profile.
 
 agentkit is a uv project. `duckdb` is the one heavy dependency, and only `agent sub review` needs it; in a clone without uv, `bin/agent` falls back to plain `python3` and everything but reviews still works.
 

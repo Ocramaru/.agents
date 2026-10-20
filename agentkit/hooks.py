@@ -4,9 +4,13 @@ A hook that injected unseen context, one that sent nothing and one that crashed 
 Author: Marco Cassar (@Ocramaru)
 """
 
+import importlib.metadata
 import os
 import time
+from datetime import datetime
 from pathlib import Path
+
+from agentkit import profile
 
 LOG = Path(os.environ.get("AGENTS_HOOK_LOG") or Path.home() / ".agents" / ".hooks.log")   # hooks/log.sh reads the same variable
 
@@ -28,12 +32,22 @@ def entries(session: str = "", log: Path = LOG, verbose: bool = False, hook: str
     if len(fields) < 4:
       if not session and not hook: kept.append(["", "", "", "", row])
       continue
-    status, *detail = fields[3].split(None, 1) or [""]
-    if not verbose and status in ROUTINE: continue   # sent, quiet, ERROR, allow...
+    status, *detail = fields[3].split(None, 1) or [""]   # the first word: sent, quiet, ERROR, allow...
+    if not verbose and status in ROUTINE: continue
     if session and not fields[2].startswith(session[:8]): continue
     if hook and fields[1] != hook: continue
     kept.append([fields[0], fields[1], fields[2], status, "".join(detail)])
   return kept
+
+
+def errors() -> list[list[str]]:
+  """Errors logged since .agents last changed, its last commit in a clone and the install itself in an install, as `entries` rows, oldest first.
+  A crash logged before then came from code this machine has since replaced."""
+  if profile.INSTALLED:   # each install writes its own RECORD, while the package's files may be links into uv's cache
+    record = next((Path(file.locate()) for file in importlib.metadata.distribution("agentkit").files or [] if file.name == "RECORD"), None)
+    since = datetime.fromtimestamp(record.stat().st_mtime).astimezone() if record and record.is_file() else datetime.fromisoformat("1970-01-01T00:00:00+00:00")   # no RECORD is a broken install, which still gets a doctor
+  else: since = datetime.fromisoformat(profile.git(profile.SHIPPED, "log", "-1", "--format=%cI").stdout.strip() or "1970-01-01T00:00:00+00:00")
+  return [row for row in entries() if row[3].startswith("ERROR") and datetime.fromisoformat(row[0]) > since]
 
 
 STYLE = {"ERROR": "bold red", "BLOCKED": "yellow", "sent": "green", "quiet": "dim", "none": "dim",
@@ -47,6 +61,6 @@ def log(hook: str, session: str, text: str, log: Path = LOG) -> None:
   """
   try:
     with Path(log).open("a", encoding="utf-8") as handle:
-      handle.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')}\t{hook:<10}\t{session[:8]:<8}\t{text}\n")
+      handle.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')}\t{hook:<10}\t{session[:8]:<8}\t{' '.join(text.splitlines()).replace('\t', ' ')}\n")   # one row per line, as entries reads it
   except OSError: pass
 

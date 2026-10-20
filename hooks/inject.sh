@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Standards and .agents notes for the file being edited, resolved in one call.
 # Everything with logic lives in agentkit; this moves bytes and counts the delimiters it writes for the one-line notice.
+# Author: Marco Cassar (@Ocramaru)
 set -euo pipefail
 . "$HOME/.agents/hooks/log.sh"
 
@@ -9,7 +10,7 @@ set -euo pipefail
 payload=$(cat)
 { read -r session; read -r path; } < <(printf '%s' "$payload" |
   jq -r '(.session_id // "nosession"), (.tool_input.file_path // .tool_input.notebook_path // "")')
-[ -n "$path" ] || { hook_log inject "$session" "skip   no file path in the payload"; exit 0; }
+[[ -n "$path" ]] || { hook_log inject "$session" "skip   no file path in the payload"; exit 0; }
 
 # Asked about this path already this session, and the answer was nothing. Four calls in five were
 # one of those, each paying a `uv run` to say so.
@@ -25,20 +26,20 @@ rc=0
 text=$(printf '%s' "$payload" |
   "$AGENTS_CLI" inject "$path" --session "$session" --edit 2>"$err") || rc=$?
 
-# A non-zero exit with nothing on stderr is `inject` saying this file is already in context. With
-# something on stderr it is a real failure, which used to look exactly the same from here.
-if [ -s "$err" ]; then
+# `inject` exits 0 with text, 1 when the file is already in context and 3 when nothing governs it. Any other
+# exit, or one of those with something on stderr, is a failure; a warning beside a zero exit is not, so the text still goes.
+if [[ "$rc" -ne 0 && ( -s "$err" || ( "$rc" -ne 1 && "$rc" -ne 3 ) ) ]]; then
   # the last line, not the first 200 bytes: two logged errors recorded only the runpy frames that
   # open every traceback, so the exception -- the one part worth keeping -- was cut off
   hook_log inject "$session" "ERROR  rc=$rc $(tail -n 1 "$err" | cut -c1-200)  $path"
   exit 0
 fi
-if [ -z "$text" ]; then
+if [[ -z "$text" ]]; then
   # agent exits 3 when nothing governs the file, 1 when it was already sent this session. Either way
   # the answer holds for the session, so remember it rather than asking again on the next edit.
   gate_ledger "$path"
   gate_mark inject "$path" "$session" "$GATE_LEDGER"
-  if [ "$rc" -eq 3 ]; then hook_log inject "$session" "none   nothing governs this file  $path"
+  if [[ "$rc" -eq 3 ]]; then hook_log inject "$session" "none   nothing governs this file  $path"
   else hook_log inject "$session" "quiet  already in context         $path"; fi
   exit 0
 fi
@@ -50,7 +51,7 @@ hook_log inject "$session" "sent   ${#text} bytes  $path"
 # loaded nothing. Counted off the delimiters agentkit already writes; set AGENTS_HOOK_QUIET=1 to
 # turn it off.
 message=""
-if [ "${AGENTS_HOOK_QUIET:-0}" != "1" ]; then
+if [[ "${AGENTS_HOOK_QUIET:-0}" != "1" ]]; then
   # one pass over the text rather than four greps: this runs on every edit that was not gated
   read -r rules notes open drops < <(printf '%s\n' "$text" | awk '
     /^--- [a-z.-]+ \([^)]+\) ---$/ { r++ }   /^--- .*\.md ---$/ { n++ }
@@ -58,14 +59,14 @@ if [ "${AGENTS_HOOK_QUIET:-0}" != "1" ]; then
     END { print r+0, n+0, o+0, d+0 }')
 
   parts=""
-  [ "$rules" -gt 0 ] && parts="$rules standard$([ "$rules" = 1 ] || echo s)"
-  [ "$notes" -gt 0 ] && parts="${parts:+$parts, }$notes note$([ "$notes" = 1 ] || echo s)"
-  [ "$open" -gt 0 ] && parts="${parts:+$parts, }open findings"
+  [[ "$rules" -gt 0 ]] && parts="$rules standard$([[ "$rules" == 1 ]] || echo s)"
+  [[ "$notes" -gt 0 ]] && parts="${parts:+$parts, }$notes note$([[ "$notes" == 1 ]] || echo s)"
+  [[ "$open" -gt 0 ]] && parts="${parts:+$parts, }open findings"
   # worth its own words rather than counting as context: it is the one part that is about the edit
-  [ "$drops" -gt 0 ] && parts="${parts:+$parts, }a task leaving todo.md unarchived"
+  [[ "$drops" -gt 0 ]] && parts="${parts:+$parts, }a task leaving todo.md unarchived"
 
   # bytes under a kilobyte: "(0k)" read as nothing delivered, and one session went looking for the rest
-  if [ "${#text}" -lt 1024 ]; then size="${#text} B"; else size="$(( ${#text} / 1024 ))k"; fi
+  if [[ "${#text}" -lt 1024 ]]; then size="${#text} B"; else size="$(( ${#text} / 1024 ))k"; fi
   message=".agents loaded ${parts:-context} for ${path##*/} ($size)"
 fi
 jq -n --arg t "$text" --arg m "$message" '{hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $t}} + (if $m == "" then {} else {systemMessage: $m} end)'

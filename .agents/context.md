@@ -40,7 +40,7 @@ The hub: standards, notes and review, linked into every agent from `~/.agents`.
 | `inject.py` | standards, notes and open findings for a file, once per session |
 | `review.py` | routes each file to the agents whose standards govern it |
 | `reviews.py` | the ledger, `<repo>/.agents/.reviews/`, gitignored |
-| `config.toml` `[backends]` | where agents run; a role maps to a model |
+| `config.toml` `[backends]` | where agents run; a role maps to a model. No `default` ships: the profile names one, and `backends.get` never falls back to the first |
 | `githooks/` | `core.hooksPath`: the repo's own hook first, a review only where a note opts the repo in |
 | `hooks/gate.sh` | any hook: skip a call whose answer is known, stamped per session, invalidated by one named file |
 

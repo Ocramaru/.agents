@@ -6,6 +6,7 @@
 #
 # It never fails the hook it is logging. A log that cannot be written is not a reason to block an
 # edit, so every line here swallows its own errors.
+# Author: Marco Cassar (@Ocramaru)
 
 AGENTS_HOOK_LOG="${AGENTS_HOOK_LOG:-$HOME/.agents/.hooks.log}"
 
@@ -15,13 +16,23 @@ AGENTS_CLI="$HOME/.agents/bin/agent"
 [[ -x "$AGENTS_CLI" ]] || AGENTS_CLI=agent
 
 hook_log() {  # hook_log <hook> <session> <what happened...>
-  local hook="$1" session="${2:-nosession}"
-  shift 2 2>/dev/null || true
+  local hook="${1:-unknown}" session="${2:-nosession}"
+  # a call with no text is a bug in the hook, so it is logged as an error rather than as the hook's name
+  if (( $# >= 3 )); then shift 2; else set -- "ERROR  hook_log needs <hook> <session> <what>, and got $# arguments"; fi
+  local tab=$'\t' newline=$'\n' text
+  text="${*//$tab/ }"   # one row per line, tab-separated, so neither goes into the text
   {
-    local size
+    local size lock="$AGENTS_HOOK_LOG.lock"
     size=$(wc -c < "$AGENTS_HOOK_LOG" 2>/dev/null || echo 0)   # stat -c is GNU; wc is everywhere
-    [ "$size" -gt 1000000 ] && tail -n 500 "$AGENTS_HOOK_LOG" > "$AGENTS_HOOK_LOG.tmp" \
-      && mv "$AGENTS_HOOK_LOG.tmp" "$AGENTS_HOOK_LOG"
-    printf '%s\t%-10s\t%-8s\t%s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$hook" "${session:0:8}" "$*" >> "$AGENTS_HOOK_LOG"
+    if [[ "$size" -gt 1000000 ]]; then
+      # mkdir is the lock, since macOS has no flock; a lock older than a minute was left by a killed hook.
+      # A line appended while the copy is made is lost, which once a megabyte is cheaper than locking every line.
+      [[ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]] && rm -rf "$lock"
+      if mkdir "$lock"; then
+        tail -n 500 "$AGENTS_HOOK_LOG" > "$lock/log" && mv "$lock/log" "$AGENTS_HOOK_LOG"
+        rm -rf "$lock"
+      fi
+    fi
+    printf '%s\t%-10s\t%-8s\t%s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$hook" "${session:0:8}" "${text//$newline/ }" >> "$AGENTS_HOOK_LOG"
   } 2>/dev/null || true
 }

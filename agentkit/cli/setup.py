@@ -1,4 +1,4 @@
-"""Commands that set a machine up and keep it right: install, hooks, the profile, updating, reporting friction, and checking.
+"""Commands that set a machine up and keep it right: install, hooks, the profile, updating, reporting friction, describing and checking.
 
 Author: Marco Cassar (@Ocramaru)
 """
@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agentkit import doctor, guard, hooks, install, issue, profile, reviews, tree, version
+from agentkit import backends, doctor, guard, hooks, install, issue, profile, reviews, status, tree, version
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli.out import done, escape, fail, line, note, report, table
 
@@ -33,11 +33,34 @@ def ask(question: str) -> str:
   except EOFError: return ""
 
 
+def pick() -> str:
+  """Ask which backend this machine has, showing each with whether it is here or how to install it, and record the answer; `""` when none is chosen."""
+  known = backends.load_backends()[0]
+  found = {name: backend.here() for name, backend in known.items()}
+  present = [name for name, (here, _) in found.items() if here]
+  done("", "Reviews run on a model. Which of these does this machine have?", *(f"  {name:<8} {known[name].spec.get('label', name):<22} {said}" for name, (_, said) in found.items()))
+  answer = ask(f"backend [{present[0] if present else 'none for now'}]: ") or (present[0] if present else "")
+  if answer not in known:
+    if answer: line(f"  skip  there is no backend called {answer}; `agent install --backend <name>` sets one later")
+    return ""
+  line(f"  set   default = {answer} in {install.home(backends.choose(answer))}")
+  return answer
+
+
+def settle(named: str | None) -> int:
+  """0 when a review has a backend: one named, the default, or one chosen now at a terminal; otherwise say how to set one and return 2."""
+  if named or backends.load_backends()[1]: return 0
+  if sys.stdin.isatty() and ask("No default backend is set, so a review has nowhere to run. Set one now? [Y/n] ").lower() in ("", "y", "yes") and pick(): return 0
+  return fail(backends.unset(), 2)
+
+
 @command("install", help="wire .agents into the agents on this machine")
 @arg("targets", nargs="*", help="claude, codex, gemini, or any name (default: whichever exist)")
 @arg("--all", action="store_true", help="create config directories that do not exist yet")
 @arg("--profile", metavar="new|URL|DIR|none", help="your private profile: make one, clone yours, use a directory, or none (default: ask, given a terminal)")
+@arg("--backend", metavar="NAME", help="what reviews run on, as `agent sub backends` lists them (default: ask, given a terminal, when none is set)")
 def cmd_install(args) -> int:
+  if args.backend and args.backend not in (known := backends.load_backends()[0]): return fail(f"there is no backend called {args.backend}; known: {', '.join(known)}", 2)
   code, kept = install.keep(args.profile)
   if code: return fail(kept)
   if kept:   # the tool does the install, so the hooks copied are the ones it will keep
@@ -61,7 +84,11 @@ def cmd_install(args) -> int:
     if not profile.git(profile.DEFAULT, "remote").stdout.strip():
       done("", "Push your profile somewhere private, so your other machines get it:", f"  git -C {profile.DEFAULT} remote add origin git@github.com:{login or '<you>'}/.agents.profile.git", f"  git -C {profile.DEFAULT} push -u origin main")
 
+  if args.backend: done("", "backend", f"  set   default = {args.backend} in {install.home(backends.choose(args.backend))}")
+  elif not backends.load_backends()[1] and sys.stdin.isatty(): pick()
+
   return done(*(["", "No profile chosen: `agent install --profile new|URL|DIR|none`, or run it at a terminal with gh logged in to be asked."] if profile.path() is None and profile.chosen() is None else []),
+              *(["", f"No backend: {backends.unset().partition(': ')[2]}."] if not backends.load_backends()[1] else []),
               *(["", "Optional: review every commit in repos that have a .agents/", "  agent hook install --global"] if not install.global_hooks_path() else []),
               "", "Done. Restart the agent to pick up the changes.")
 
@@ -117,7 +144,7 @@ def cmd_hook(args) -> int:
 @arg("--hook", default="", help="only one hook: inject for edits, post-commit for commits, no-reformat")
 def cmd_hooks(args) -> int:
   rows = hooks.entries(args.session, verbose=args.verbose, hook=args.hook)
-  if not args.all_: rows = rows[-args.tail:]
+  if not args.all_: rows = rows[-args.tail:] if args.tail > 0 else []   # [-0:] is everything
 
   if not rows:
     return fail(f"{'nothing worth reporting' if hooks.LOG.is_file() else 'no log yet'} in {hooks.LOG}{'' if args.verbose else ' (--verbose for the routine lines)'}")
@@ -219,6 +246,11 @@ def cmd_issue(args) -> int:
     return done(*(issue.filed(repo) or ["nothing filed against the hub"]))
   if not args.title: return fail("say what was awkward, or pass --list to read what already is", 2)
   return report(*issue.file(args.title, args.body, Path.cwd(), repo, dry=args.dry, context=args.context))
+
+
+@command("status", help="what this machine has: the install, profile, backend, standards, notes, findings and hooks")
+def cmd_status(args) -> int:
+  return done(*(f"{part:<12}  {state}" for part, state in status.rows()))
 
 
 @command("doctor", help="check this machine's install and the standards graph")

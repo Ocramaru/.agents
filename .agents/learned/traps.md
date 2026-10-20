@@ -6,13 +6,23 @@ kind: learned
 
 # Traps
 
+- **A hook that exits 0 when its CLI fails hides a command that no longer exists.** doc-check.sh called `agent run` after `run` moved under `agent sub`, and `|| exit 0` with nothing logged made every opted-in session end look like a clean check. A hook that cannot run its CLI logs an ERROR with the last line the CLI printed.
+
+- **A ledger belongs to one checkout, so its closures do not travel.** It sits at the checkout's root and a review reads dismissals only from there: findings closed `--as wrong` in a worktree are unknown to `~/.agents`, whose next review of the same lines raises them again. Close them again there, with the same reasons, once the work lands.
+
+- **A pseudo-terminal test must answer every question the run asks.** Answers typed ahead cover only the questions a test expected; when install gained the backend question, three profile tests each sat out the 30 s read timeout and the suite took 109 s. Give such a test the flag for every question it is not about.
+
+- **uvx puts its throwaway environment first on PATH for whatever it runs, and an exec inherits it.** The install handed over to the kept tool still found uvx's own `agent` first, which the hooks would have called after uv deleted it. Drop `sys.prefix/bin` from PATH when handing over.
+
+- **A test helper that ignores git's exit code can make a test vacuous.** The update test published its hub into a directory that already held the profile; `git clone` failed, nothing said so, and update's pull of the hub went untested for as long as the test existed. Assert on what a helper was meant to make.
+
 - **An editable install copies every `force-include`d file into the venv.** hatchling writes `agentkit/shipped/` into `.venv`'s site-packages beside the `.pth`, and nothing reads it: the checkout's package is the one imported, and `profile.INSTALLED` looks only beside it. `sources` cannot stand in, since it rewrites directory prefixes and not `AGENTS.md` or `config.toml`.
 
 - **`git ls-files` lists only tracked files.** `agent sub review` on a directory of new, not-yet-added files found nothing while an explicit `.py` path routed, in a repo whose package had never been committed. Discovery lists `--cached --others --exclude-standard`: new files count, `.gitignore` still holds.
 
 - **Per-test coverage cannot choose which tests to cut.** `pytest --cov` does not trace the tests that run `agent(...)` as a subprocess, so they look like they reach nothing, and Python 3.14's default core cannot record `--cov-context`; set `COVERAGE_CORE=ctrace`. A test is worth keeping if a mutation of the source fails it: apply the edit, run the test, revert.
 
-- **A test of a hook that sources `$HOME/.agents` runs the installed hub, not the checkout.** Mutating `hooks/gate.sh` in a worktree changed nothing until the test gave the hook a throwaway HOME whose `.agents` points at the checkout (`test_gate.Hook`). Check that a mutated copy of the code under test fails the test.
+- **A test of a hook that sources `$HOME/.agents` runs the installed hub, not the checkout.** Mutating `hooks/gate.sh` in a worktree changed nothing until the test gave the hook a throwaway HOME whose `.agents` points at the checkout, and `test_archiving` kept firing the live hub's `log.sh` until a hook change broke it there. Fire a hook under `conftest.checkout_home`, and check that a mutated copy of the code under test fails the test.
 
 - **The argparse fold test passes vacuously on a newer Python.** Only system 3.12.3 strands `nargs="*"` after a flag; 3.12.12, 3.13 and 3.14 do not, so the test bites only under `UV_PYTHON=/usr/bin/python3.12`.
 
@@ -46,7 +56,7 @@ kind: learned
 
 - **A regex cannot see shell quoting.** The formatter guard's second regex matched a formatter after `&&` inside a quoted string. Parse with `shlex` and match only at a command position.
 
-- **Every commit a subagent makes in its worktree starts a full background review.** The global post-commit hook fires there too, so three agents' commits started three reviews of work about to be squashed, each writing a ledger into a worktree that was then removed. Squash first and let the landed commit be the one reviewed, or expect the folders to reappear until those reviews finish.
+- **Every commit a subagent makes in its worktree starts a full background review.** The global post-commit hook fires there too, so three agents' commits started three reviews of work about to be squashed, each writing a ledger into a worktree that was then removed. A rebase does the same for every commit it rewrites: one autosquash over nine commits started nine reviews at once, about 36 `claude -p` calls on history already reviewed. Squash first and let the landed commit be the one reviewed, or pass `-c core.hooksPath=/dev/null` to the rebase, or expect the folders to reappear until those reviews finish.
 
 - **A subagent given its own worktree starts from `origin/main`, not local `main`.** With eleven commits unpushed, five agents began on code from before the CLI split. Push first, or have each agent `git reset --hard main` before it starts.
 
@@ -62,7 +72,7 @@ kind: learned
 
 - **A path hard-coded to `/tmp` is not where per-session state lives on macOS.** `tempfile` and `forget.sh` honour `TMPDIR`, a per-user directory there, so stamps under `/tmp` would have survived compaction and claimed context that was gone. Per-session state goes under `${TMPDIR:-/tmp}/agents-<session>`.
 
-- **`python -m` runs the package in the working directory ahead of `PYTHONPATH`.** `agent` run from inside another checkout ran that checkout's code, and every test happened to run from the right directory. `-P` turns it off.
+- **`python -m` and `python -c` run the package in the working directory ahead of `PYTHONPATH`.** `agent` run from inside another checkout ran that checkout's code, and every test happened to run from the right directory; a test asking an installed venv's Python a question from the checkout imported the checkout and passed against a mutation. `-P`, and a working directory away from the checkout.
 
 - **A model role must name a kind, and every role an agent asks for must exist on every backend.** `large` meant a coder model on ollama, so prose would have been judged by it; `small` existed nowhere on ollama, so an agent naming no model could not run there. Roles are `text` or `code`, optionally `-large`, `model_for` narrows to what a backend has, and a test checks every installed agent's role resolves.
 

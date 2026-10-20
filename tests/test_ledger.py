@@ -142,6 +142,10 @@ def test_doctor_names_a_bad_setting_and_judges_format_on_save_and_hook_errors(tm
   monkeypatch.chdir(repo)
   failed = [label for passed, label, _ in doctor.checks() if not passed]
   assert f"{repo.name}/agents.toml inject = 'ful'" in failed and f"{repo.name}/agents.toml applies -> nosuch" in failed
+  (repo / ".agents" / "agents.toml").write_text('inject = "full",\n')   # a trailing comma, as a hand edit leaves one
+  (passed, label, fix), = [check for check in doctor.checks() if "parses" in check[1]]
+  assert not passed and label.endswith("agents.toml parses as TOML") and fix.startswith("fix it: ")
+  (repo / ".agents" / "agents.toml").unlink()
 
   for where, setting, enabled in ((repo, '"editor.formatOnSave": true', True), (repo, '"editor.formatOnSave": false', False), (plain, '// "editor.formatOnSave": true,\n  "a": 1', False)):   # plain is outside any repo
     put(where, ".vscode/settings.json", text=f'{{\n  // mine\n  {setting}\n}}')

@@ -5,6 +5,7 @@ Author: Marco Cassar (@Ocramaru)
 
 import json
 import subprocess
+import urllib.error
 from types import SimpleNamespace
 
 import pytest
@@ -39,6 +40,21 @@ def test_a_backend_fills_its_argv_once_and_finds_its_reply_in_whatever_it_printe
   assert Backend("ollama", {"kind": "http", "url": "u"}).parallel == 1   # one process holds one model
   assert Backend("x", {"kind": "http", "url": "u", "parallel": 3}).parallel == 3
   with pytest.raises(ValueError, match="no model for role 'code'; it has text, code-large"): Backend("o", {"kind": "http", "url": "u", "models": {"text": "t", "code-large": "cl"}}).model_for("code")   # exact, never a guess
+
+
+def test_an_http_backend_waits_out_a_dropped_call_but_not_a_refusal(monkeypatch):
+  """A 5xx is a server swapping models, so it is tried again; a 4xx is the server's answer, raised on the first try."""
+  calls = []
+  def answer(request, timeout):
+    calls.append(request)
+    raise urllib.error.HTTPError(request.full_url, code, "no", {}, None)
+  monkeypatch.setattr(backends.urllib.request, "urlopen", answer)
+  monkeypatch.setattr(backends.time, "sleep", lambda seconds: None)
+
+  for code, tries, said in ((404, 1, "refused the call"), (503, 3, "unreachable")):
+    calls.clear()
+    with pytest.raises(RuntimeError, match=said): Backend("ollama", {"kind": "http", "url": "http://localhost:1/v1", "models": {"text": "m"}}).run("hi")
+    assert len(calls) == tries, code
 
 
 def test_a_reply_is_read_wherever_its_object_sits_and_a_turn_keeps_its_tier_and_its_cap():
@@ -83,7 +99,7 @@ def test_a_conversation_continues_from_the_ledger_and_only_a_verdict_replaces_it
   backend = Stub(findings({"line": 1, "issue": "no author line", "fix": "add it"}), {"kind": "answer", "state": "completed", "body": "I would test add(2, 3) first."}, {"kind": "note", "state": "failed", "body": "timed out"})
   monkeypatch.setattr(backends, "get", lambda *args, **kwargs: backend)
   monkeypatch.chdir(ledger)
-  assert cli.main(["sub", "run", "file-review", "mod.py", "--task", "talk"]) == 0
+  assert cli.main(["sub", "run", "file-review", "mod.py", "--task", "talk", "--backend", "stub"]) == 0
   assert (kept := reviews.latest("talk", ledger))["file"] == "mod.py" and kept["run"] and len(kept["messages"]) == 2
 
   still = lambda: [finding["issue"] for finding in reviews.open_findings(ledger)]
@@ -99,7 +115,7 @@ def test_a_conversation_continues_from_the_ledger_and_only_a_verdict_replaces_it
   reply("talk", "fixed, recheck")
   assert still() == []   # a clean verdict is
 
-  assert cli.main(["sub", "run", "file-review", "mod.py", "--task", "gone"]) == 0   # a fresh turn cap
+  assert cli.main(["sub", "run", "file-review", "mod.py", "--task", "gone", "--backend", "stub"]) == 0   # a fresh turn cap
   source.unlink()
   reply("gone", "removed it")
   assert "has since been deleted" in backend.shown[-1]
@@ -195,3 +211,16 @@ def test_an_agent_sends_only_the_standards_that_govern_the_file_resolved_as_inje
   document = ag.definition("file-review", ag.definitions())
   assert "RUN-RULE" not in ag.instructions(document, Library(), source)
   assert "RUN-RULE" in ag.instructions(document, review.library(source, {}), source)
+
+
+def test_an_http_backend_is_looked_for_on_the_port_its_url_means(monkeypatch):
+  """The backend question knocks on a URL's own port, or its scheme's when it names none, and says where it looked."""
+  tried = []
+
+  def refuse(address, timeout):
+    tried.append(address)
+    raise OSError("refused")
+  monkeypatch.setattr(backends.socket, "create_connection", refuse)
+  said = [Backend("x", {"kind": "http", "url": url}).here() for url in ("https://models.example/v1", "http://models.example/v1", "http://localhost:11434/v1")]
+  assert tried == [("models.example", 443), ("models.example", 80), ("localhost", 11434)]
+  assert said[2] == (False, "not running at localhost:11434: start its server")

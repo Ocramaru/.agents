@@ -6,6 +6,10 @@ kind: learned
 
 # Settled
 
+- **The console script starts in 77 to 81 ms, the clone's `bin/agent` in 83 to 97.** Median of ten on this machine, Python 3.15, `--version` and `inject` on a file nothing governs. Skipping `uv run` saves 6 to 16 ms, so an `agent hook <name>` would cost about 77 ms on every edit where the shell gate answers a repeat in 12: the hooks stay shell.
+
+- **An install is dated by its RECORD.** uv links a package's files from its cache, so their mtimes are the cache's; RECORD is written by each install. `hooks.errors` counts an install's hook errors from then, and `uv tool upgrade` rebuilds a directory source once its version changes, which is what lets a test upgrade for real.
+
 - **A review's time is the model thinking, and effort is the knob; a smaller model is not.** One file-review of a 336-line module, one sample each: Sonnet at default effort 183 s, 3 findings, 17,013 output tokens; medium 123 s, 5 findings, all substantive; low 19 s, 4 findings, two of them noise and both real ones missed; Haiku 129 s and an unreadable reply. The prompt was 27,000 characters, so reading it is not the cost. Choosing files is milliseconds and was never it either.
 
 - **The public `.agents` plus a private profile reproduces the hub exactly.** Staged from HEAD and checked both ways: `.agents` alone passes its whole suite on the starters with every reviewer and standard resolving, and `.agents` plus the profile governs every probed file type with the same standards as before, the profile's own versions delivered. The cutover was rehearsed against local bare repos for the first machine and a following one, 17 checks each. A leak scan over the public tree found 14 references to private projects in code comments and fixtures before anything was published.

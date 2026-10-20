@@ -72,7 +72,7 @@ def test_notes_commands_resolve_from_where_you_stand_and_say_what_they_found(pro
 
 
 def test_version_names_the_release_and_the_commit(project):
-  """`agent --version` is the pyproject version and this checkout's commit, the line `agent issue` and doctor carry too."""
+  """`agent --version` is the pyproject version and this checkout's commit, the version `agent issue` and `agent status` carry too."""
   assert agent(["--version"], cwd=project).stdout.strip() == f"agentkit {version()}" and "(" in version()
 
 
@@ -143,7 +143,7 @@ def test_a_failed_review_says_why_and_is_not_offered_a_reply(project, monkeypatc
 
   stdout = io.StringIO()
   stderr = io.StringIO()
-  with contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(stdout): cli.main(["sub", "review", "auto", "a.py", "--keep"])
+  with contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(stdout): cli.main(["sub", "review", "auto", "a.py", "--keep", "--backend", "claude"])
   assert "Traceback" not in stderr.getvalue()
   shown = stdout.getvalue()
   assert "a.py" in shown and "failed" in shown and "error: TimeoutExpired" in shown   # why, by the file

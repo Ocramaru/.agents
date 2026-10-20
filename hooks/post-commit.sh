@@ -3,7 +3,8 @@
 #
 # A commit must never wait on a model, so this returns immediately and the findings turn up in
 # `agent sub reviews --open` when they land. Installed per repo by `agent hook install`, which writes
-# a shim calling this, so a `git pull` in the hub updates the logic everywhere.
+# a shim calling this, so updating the hub updates the logic everywhere.
+# Author: Marco Cassar (@Ocramaru)
 set -euo pipefail
 . "$HOME/.agents/hooks/log.sh"
 
@@ -15,7 +16,7 @@ log="$root/.agents/.reviews/post-commit.log"
 mkdir -p "$(dirname "$log")"
 
 args=(sub review "$agent" --commit HEAD)
-[ -n "$backend" ] && args+=(--backend "$backend")
+[[ -n "$backend" ]] && args+=(--backend "$backend")
 
 printf '\n=== %s %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$(git rev-parse --short HEAD)" >>"$log"
 

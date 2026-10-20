@@ -37,7 +37,7 @@ class Hook:
     """Run the hook once and return the status it logged."""
     logged = len(self.statuses())
     assert self.run(path, old, new).returncode == 0
-    assert len(self.statuses()) == logged + 1, "the hook logged nothing for this call"
+    assert len(self.statuses()) == logged + 1, "the hook did not log exactly one row for this call"
     return self.statuses()[-1]
 
   def statuses(self) -> list[str]:
@@ -80,3 +80,9 @@ def test_a_review_landing_or_compaction_reopens_the_gate(repo, tmp_path):
 
   subprocess.run(["bash", str(HOOKS / "forget.sh")], input=json.dumps({"session_id": hook.session}), text=True, capture_output=True, check=True, env=hook.environment)
   assert hook.fire(mod) == "sent"   # the standards go back in
+
+
+def test_gate_ledger_walks_up_an_absolute_path_and_stops_on_a_relative_one(tmp_path):
+  """The nearest .agents above an absolute path names the ledger; a relative path ends the walk instead of stripping it forever."""
+  (tmp_path / "repo" / ".agents").mkdir(parents=True)
+  assert subprocess.run(["bash", "-c", f'. "{HOOKS}/gate.sh"; for path in "$@"; do gate_ledger "$path"; printf "%s\\n" "$GATE_LEDGER"; done', "gate", str(tmp_path / "repo" / "src" / "mod.py"), "mod.py", "src/mod.py"], capture_output=True, text=True, timeout=10, check=True, cwd=tmp_path).stdout.splitlines() == [str(tmp_path / "repo" / ".agents" / ".reviews" / "reviews.duckdb"), "", ""]

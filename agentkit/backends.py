@@ -8,11 +8,15 @@ Author: Marco Cassar (@Ocramaru)
 import http.client
 import json
 import re
+import shutil
+import socket
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 
 from agentkit import profile as _profile
 
@@ -64,6 +68,16 @@ class Backend:
       with urllib.request.urlopen(request, timeout=30): return True
     except Exception:  # noqa: BLE001 -- a model left loaded is not a failed review
       return False
+
+  def here(self) -> tuple[bool, str]:
+    """Whether this machine has it, and in words where, or how to install it when it does not."""
+    if self.kind == "cli":
+      found = shutil.which((self.spec.get("argv") or [""])[0])
+      return (True, f"found at {found}") if found else (False, f"not installed: {self.spec.get('install', 'see its own docs')}")
+    address = urllib.parse.urlsplit(self.spec.get("url", ""))
+    try: socket.create_connection((address.hostname or "localhost", address.port or (443 if address.scheme == "https" else 80)), timeout=1).close()
+    except OSError: return False, f"not running at {address.netloc}: {self.spec.get('install', 'start its server')}"
+    return True, f"running at {address.netloc}"
 
   def model_for(self, role: str) -> str:
     """The model this backend runs for `role`; raises naming the roles it has when it has none."""
@@ -120,6 +134,7 @@ class Backend:
       try:
         with urllib.request.urlopen(urllib.request.Request(self.spec["url"], data=payload, headers={"Content-Type": "application/json"}), timeout=timeout) as response: return Reply(json.loads(response.read())["choices"][0]["message"]["content"].strip())
       except (urllib.error.URLError, http.client.HTTPException, ConnectionError, TimeoutError) as error:
+        if isinstance(error, urllib.error.HTTPError) and error.code < 500: raise RuntimeError(f"{self.name} refused the call at {self.spec['url']}: {error}") from error   # a wrong model or a bad request, which no wait changes
         last = error
         if attempt + 1 < tries: time.sleep(2 * (attempt + 1))
 
@@ -146,15 +161,27 @@ def _dotted(node: dict, path: str | None):
 
 
 def load_backends() -> tuple[dict[str, Backend], str]:
-  """Every backend by name, a later layer's replacing one of the same name, and the last `default` set."""
+  """Every backend by name, a later layer's replacing one of the same name, and the last `default` set, `""` when none is."""
   default = (table := _profile.section("backends")).pop("default", "")   # the one plain value among the backends' tables
-  backends = {name: Backend(name, specification) for name, specification in table.items()}
-  return backends, default or next(iter(backends), "")
+  return {name: Backend(name, specification) for name, specification in table.items()}, default
+
+
+def unset() -> str:
+  """What to do when no default backend is set, naming the ones there are."""
+  return f"no default backend is set, so a review has nowhere to run: `agent install --backend <{'|'.join(load_backends()[0])}>`, or run this at a terminal to be asked"
 
 
 def get(name: str | None = None) -> Backend:
-  """The named backend, or the default; exits if unknown."""
+  """The named backend, or the default; exits if it is unknown or none is set."""
   backends, default = load_backends()
   chosen = name or default
+  if not chosen: raise SystemExit(unset())
   if chosen not in backends: raise SystemExit(f"unknown backend {chosen!r}. known: {', '.join(sorted(backends))}")
   return backends[chosen]
+
+
+def choose(name: str) -> Path:
+  """Make `name` the default backend: in the profile's config.toml, or this machine's local.toml when there is no profile. Returns the file written."""
+  where = root / "config.toml" if (root := _profile.path()) else _profile.LOCAL
+  _profile.write(where, "backends", "default", name)
+  return where
