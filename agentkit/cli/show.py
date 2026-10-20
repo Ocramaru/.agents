@@ -1,4 +1,4 @@
-"""How results read: one review as it lands, a run's tally, the open findings as a table.
+"""How results read: what a review's result was, one review as it lands, the open findings as a table.
 
 Kept apart from the commands because a run prints a result live and `agent sub reviews` prints it
 again later, and both print it the same way.

@@ -15,14 +15,13 @@ import webbrowser
 from pathlib import Path
 
 from agentkit import gh, git, hub
-from agentkit.hub import BUNDLED, INSTALLED
 
 LINK_LIMIT = 8000   # characters a browser will take in a link
 
 
-def slug(hub: Path = BUNDLED) -> str | None:
+def slug(checkout: Path = hub.BUNDLED) -> str | None:
   """owner/name of the hub on GitHub: a clone's origin remote, or the Repository URL an install carries in its metadata."""
-  return gh.repository(dict(entry.split(", ", 1) for entry in importlib.metadata.metadata("agentkit").get_all("Project-URL") or []).get("Repository", "") if INSTALLED else git.run(hub, "remote", "get-url", "origin").stdout.strip())
+  return gh.repository(dict(entry.split(", ", 1) for entry in importlib.metadata.metadata("agentkit").get_all("Project-URL") or []).get("Repository", "") if hub.INSTALLED else git.run(checkout, "remote", "get-url", "origin").stdout.strip())
 
 
 def open_issues(repository: str) -> list[dict] | None:

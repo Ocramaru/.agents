@@ -197,6 +197,6 @@ def test_doctor_checks_gh_for_the_duplicate_lookup_and_the_listing(monkeypatch, 
 ])
 def test_the_hub_repo_comes_from_its_remote(tmp_path, url, want):
   """owner/name is read from the hub's remote, so a fork files on itself."""
-  hub = git(tmp_path / "hub")
-  if url: subprocess.run(["git", "remote", "add", "origin", url], cwd=hub, check=True)
-  assert issue.slug(hub) == want
+  checkout = git(tmp_path / "hub")
+  if url: subprocess.run(["git", "remote", "add", "origin", url], cwd=checkout, check=True)
+  assert issue.slug(checkout) == want

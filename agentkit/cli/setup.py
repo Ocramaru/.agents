@@ -1,4 +1,4 @@
-"""Commands that set a machine up and keep it right: install, hooks, the profile, updating, reporting friction, describing and checking.
+"""Commands that set a machine up and keep it right: install, hooks, the formatter guard, the profile, updating, reporting friction, describing and checking.
 
 Author: Marco Cassar (@Ocramaru)
 """

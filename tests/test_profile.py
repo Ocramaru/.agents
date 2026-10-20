@@ -114,11 +114,11 @@ def test_the_pointer_to_your_profile_follows_the_hubs_and_moves_with_the_profile
   claude = isolated / "home" / ".claude" / "CLAUDE.md"
   claude.parent.mkdir(parents=True)
 
-  for start in ("my notes", f"my notes\n\n@{install.HOME}/AGENTS.md"):
+  for start in ("my notes", f"my notes\n\n@{hub.HOME}/AGENTS.md"):
     claude.write_text(start)
     assert "your profile" in install.point_at(claude)[0]
     text = claude.read_text()
-    assert text.startswith(start) and text.endswith(f"@{install.HOME}/AGENTS.md\n@{first}/AGENTS.md\n")
+    assert text.startswith(start) and text.endswith(f"@{hub.HOME}/AGENTS.md\n@{first}/AGENTS.md\n")
     assert install.point_at(claude)[0].startswith("ok") and claude.read_text() == text
 
   monkeypatch.setenv("AGENTS_PROFILE", str(second))
@@ -132,9 +132,9 @@ def test_dropping_the_profile_drops_its_pointers_whole_line(isolated, monkeypatc
   monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
   monkeypatch.setenv("AGENTS_PROFILE", "")
   (claude := isolated / "home" / ".claude" / "CLAUDE.md").parent.mkdir(parents=True)
-  claude.write_text(f"my notes\n@{install.HOME}/AGENTS.md\n  @{isolated}/old/AGENTS.md \nafter\n")
+  claude.write_text(f"my notes\n@{hub.HOME}/AGENTS.md\n  @{isolated}/old/AGENTS.md \nafter\n")
   assert install.repoint(isolated / "old" / "AGENTS.md") == ["point .claude/CLAUDE.md at no profile"]
-  assert claude.read_text() == f"my notes\n@{install.HOME}/AGENTS.md\nafter\n"
+  assert claude.read_text() == f"my notes\n@{hub.HOME}/AGENTS.md\nafter\n"
 
 
 def test_a_profile_is_adopted_checked_for_drift_updated_and_made(isolated, monkeypatch, capsys):

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from conftest import REPO, git, note, put
 
-from agentkit import hooks, install
+from agentkit import hooks, hub, install
 
 
 @pytest.fixture
@@ -82,14 +82,14 @@ def test_install_wires_claude_once_and_leaves_the_rest_alone(home):
   assert json.loads(settings.read_text())["permissions"] == {"allow": ["Bash(ls)"]}   # untouched
   assert "PreToolUse" in json.loads(settings.read_text())["hooks"]
   assert sorted(saved.read_text() for saved in settings.parent.glob("settings.json.bak*")) == ["older", '{"permissions": {"allow": ["Bash(ls)"]}}']
-  assert (home / ".agents").resolve() == install.HOME   # linked, since it was missing
-  assert (home / ".local" / "bin" / "agent").resolve() == install.BUNDLED / "bin" / "agent"
+  assert (home / ".agents").resolve() == hub.HOME   # linked, since it was missing
+  assert (home / ".local" / "bin" / "agent").resolve() == hub.BUNDLED / "bin" / "agent"
   assert (home / ".claude" / "CLAUDE.md").read_text().count("AGENTS.md") == 1
 
   code, lines = install.run([])
   changes = [line for line in lines if line.strip().partition(" ")[0] in CHANGES]
   assert code == 0 and changes == [], changes
-  assert f"  ok    .agents -> {install.HOME}" in lines   # a second run says the link it found
+  assert f"  ok    .agents -> {hub.HOME}" in lines   # a second run says the link it found
 
   for text in ("{not json", "[1, 2]"):
     settings.write_text(text)
@@ -99,12 +99,12 @@ def test_install_wires_claude_once_and_leaves_the_rest_alone(home):
 def test_an_installed_package_reads_its_own_copy_and_keeps_state_in_home(tmp_path):
   """A package carrying `bundled/` reads standards, reviewers and config from it and keeps state in ~/.agents; a checkout is both."""
   site = tmp_path / "site"
-  shutil.copytree(install.BUNDLED / "agentkit", site / "agentkit", ignore=shutil.ignore_patterns("__pycache__"))
+  shutil.copytree(hub.BUNDLED / "agentkit", site / "agentkit", ignore=shutil.ignore_patterns("__pycache__"))
   (site / "agentkit" / "bundled").mkdir()
   shown = subprocess.run([sys.executable, "-P", "-c", "from agentkit import hub, profile; print(hub.BUNDLED, hub.HOME, hub.CONFIG, hub.LOCAL, profile.DEFAULT, hub.STANDARDS, hub.REVIEWERS)"], cwd=tmp_path, capture_output=True, check=True, text=True, env={**os.environ, "PYTHONPATH": str(site), "HOME": str(tmp_path / "home")}).stdout.split()
   bundled, home = (site / "agentkit" / "bundled").resolve(), tmp_path / "home" / ".agents"
   assert shown == [str(path) for path in (bundled, home, bundled / "config.toml", home / "local.toml", home / "profile", bundled / "standards", bundled / "agents")]
-  assert install.BUNDLED == install.HOME == REPO   # a checkout is its own state
+  assert hub.BUNDLED == hub.HOME == REPO   # a checkout is its own state
 
 
 def test_the_wheel_carries_the_package_and_every_bundled_file_and_nothing_of_this_machine(wheel):
@@ -156,9 +156,9 @@ def test_an_installs_stale_copies_are_files_nested_ones_included(tmp_path, monke
   bundled, home = tmp_path / "bundled", tmp_path / "home"
   put(bundled, "AGENTS.md", "hooks/a.sh", "githooks/_dispatch", "commands/nested/b.md")
   put(home, "hooks/a.sh")
-  monkeypatch.setattr(install, "INSTALLED", True)
-  monkeypatch.setattr(install, "BUNDLED", bundled)
-  monkeypatch.setattr(install, "HOME", home)
+  monkeypatch.setattr(hub, "INSTALLED", True)
+  monkeypatch.setattr(hub, "BUNDLED", bundled)
+  monkeypatch.setattr(hub, "HOME", home)
   assert [str(source.relative_to(bundled)) for source in install.stale()] == ["AGENTS.md", "commands/nested/b.md", "githooks/_dispatch"]
 
 
@@ -348,7 +348,7 @@ def test_a_commit_runs_the_repos_own_hook_first_and_is_reviewed_only_where_a_not
   (home / ".agents" / "hooks").mkdir(parents=True)
   (home / ".agents" / "hooks" / "post-commit.sh").write_text(f"#!/usr/bin/env bash\necho reviewed >> {tmp_path}/marks\n")   # where the real review would start, so no model is called
   (home / ".agents" / "hooks" / "post-commit.sh").chmod(0o755)
-  (home / ".agents" / "hooks" / "log.sh").symlink_to(install.BUNDLED / "hooks" / "log.sh")   # the real logger, into this HOME
+  (home / ".agents" / "hooks" / "log.sh").symlink_to(hub.BUNDLED / "hooks" / "log.sh")   # the real logger, into this HOME
   repo = git(tmp_path / "repo")
 
   assert commit(repo) == []
