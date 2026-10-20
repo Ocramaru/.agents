@@ -3,7 +3,10 @@
 Author: Marco Cassar (@Ocramaru)
 """
 
+import os
 import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 from agentkit import doctor, guard, hooks, install, issue, profile, reviews, tree, version
@@ -22,6 +25,12 @@ exec "$HOME/.agents/hooks/post-commit.sh" {{agent}} {{backend}}
 @arg("--all", action="store_true", help="create config directories that do not exist yet")
 @arg("--profile", metavar="URL|DIR", help="your private profile: cloned to ~/.agents/profile, or used where it is")
 def cmd_install(args) -> int:
+  code, kept = install.keep()
+  if code: return fail(kept)
+  if kept:   # the tool does the install, so the hooks copied are the ones it will keep
+    line(f"keep  agentkit as a uv tool: {kept}")
+    os.execve(kept, [kept, *sys.argv[1:]], os.environ | {"PATH": os.pathsep.join(entry for entry in os.environ.get("PATH", "").split(os.pathsep) if Path(entry).resolve() != (Path(sys.prefix) / "bin").resolve())})   # without uvx's own environment, which leads PATH
+
   code, lines = install.run(args.targets, create=args.all, profile=args.profile)
   if code == 0 and not install.global_hooks_path():
     lines += ["", "Optional: review every commit in repos that have a .agents/", "  agent hook install --global"]
@@ -96,21 +105,39 @@ def cmd_guard(args) -> int:
   return done(f"{found}: {settings['advice']}" if settings["advice"] else found, code=2)   # 2 is the code the hook turns into a block
 
 
-@command("update", help="pull .agents and your profile")
+@command("update", help="upgrade .agents and pull your profile")
 def cmd_update(args) -> int:
-  """Pull the hub and the profile, fast-forward only, so a pull that needs a merge fails instead of merging."""
+  """Upgrade the hub, through uv for an install and by pulling a clone, then pull the profile, saying what each moved.
+
+  Pulls are fast-forward only, so one that needs a merge fails instead of merging.
+  """
   bad, was = 0, version()
-  for name, where in ((".agents", profile.HUB), ("profile", profile.path())):
+  if profile.INSTALLED:   # uv replaces the package, and the new one copies its own hooks into ~/.agents
+    try: upgraded = subprocess.run(["uv", "tool", "upgrade", "agentkit"], capture_output=True, check=False, text=True)
+    except FileNotFoundError: upgraded = subprocess.CompletedProcess(["uv"], 127, "", "uv is not on PATH")
+    bad += upgraded.returncode != 0
+    if upgraded.returncode: line(f"FAIL   .agents: {((upgraded.stderr or upgraded.stdout).strip().splitlines() or ['uv said nothing'])[-1]}")
+    elif (now := subprocess.run([str(install.CLI), "--version"], capture_output=True, check=False, text=True).stdout.strip().removeprefix("agentkit ")) == was: line(f"ok     .agents: already current at {now}")   # the new code says its version
+    else:
+      copied = subprocess.run([str(install.CLI), "install"], capture_output=True, check=False, stdin=subprocess.DEVNULL, text=True)   # no terminal, so it never asks
+      bad += copied.returncode != 0
+      done(f"ok     .agents: upgraded {was} -> {now}" if copied.returncode == 0 else f"FAIL   .agents: upgraded {was} -> {now}, but its install did not finish; run `agent install`", *(f"       {said.strip()}" for said in copied.stdout.splitlines() if (said.split() or [""])[0] in ("copy", "wrote", "link", "point", "saved", "cannot")))
+
+  for name, where in ((".agents", None if profile.INSTALLED else profile.SHIPPED), ("profile", profile.path())):
+    if name == ".agents" and where is None: continue
     if where is None or not (where / ".git").exists():
       line(f"skip   {name}: {'not a git repo' if where else 'none set'}")
       continue
 
+    before = profile.git(where, "rev-parse", "HEAD").stdout.strip()
     pulled = profile.git(where, "pull", "--ff-only", "-q")
     bad += pulled.returncode != 0
-    said = (pulled.stderr or pulled.stdout).strip().splitlines()
-    line(f"{'ok' if pulled.returncode == 0 else 'FAIL':<6} {name}: {said[-1] if said else 'up to date' if pulled.returncode == 0 else 'no output'}  ({where})")
+    if pulled.returncode: line(f"FAIL   {name}: {((pulled.stderr or pulled.stdout).strip().splitlines() or ['git said nothing'])[-1]}  ({where})")
+    else:
+      count = int(profile.git(where, "rev-list", "--count", f"{before}..HEAD" if before else "HEAD").stdout.strip() or 0)
+      line(f"ok     {name}: {f'pulled {count} commit' + ('s' if count != 1 else '') if count else 'already current'}  ({where})")
 
-  if (now := version()) != was: line(f"       agentkit {was} -> {now}")
+  if not profile.INSTALLED and (now := version()) != was: line(f"       agentkit {was} -> {now}")
   return 1 if bad else 0
 
 

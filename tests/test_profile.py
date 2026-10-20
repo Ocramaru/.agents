@@ -108,11 +108,11 @@ def test_the_pointer_to_your_profile_follows_the_hubs_and_moves_with_the_profile
   claude = isolated / "home" / ".claude" / "CLAUDE.md"
   claude.parent.mkdir(parents=True)
 
-  for start in ("my notes", f"my notes\n\n@{install.HUB}/AGENTS.md"):
+  for start in ("my notes", f"my notes\n\n@{install.HOME}/AGENTS.md"):
     claude.write_text(start)
     assert "your profile" in install.point_at(claude)[0]
     text = claude.read_text()
-    assert text.startswith(start) and text.endswith(f"@{install.HUB}/AGENTS.md\n@{first}/AGENTS.md\n")
+    assert text.startswith(start) and text.endswith(f"@{install.HOME}/AGENTS.md\n@{first}/AGENTS.md\n")
     assert install.point_at(claude)[0].startswith("ok") and claude.read_text() == text
 
   monkeypatch.setenv("AGENTS_PROFILE", str(second))
@@ -138,10 +138,12 @@ def test_a_profile_is_adopted_checked_for_drift_updated_and_made(isolated, monke
   (clone / "voice.md").write_text("new\n")
   assert profile.drift(clone) == ["1 uncommitted change", "1 commit not pushed"]
 
-  monkeypatch.setattr(profile, "HUB", published(isolated, "hub")[1])
+  monkeypatch.setattr(profile, "SHIPPED", published(isolated, "agents")[1])
   profile.git(clone, "push", "-q")
   assert cli.setup.cmd_update(argparse.Namespace()) == 0
   assert profile.git(profile.DEFAULT, "log", "-1", "--format=%s").stdout == "second\n"
+  said = capsys.readouterr().out
+  assert ".agents: already current" in said and "profile: pulled 1 commit  (" in said
 
   commit(profile.DEFAULT, "here")
   commit(clone, "there")

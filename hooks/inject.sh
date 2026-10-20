@@ -23,7 +23,7 @@ rc=0
 # The payload goes back in on stdin so `inject` can see what the edit removes, not only what the
 # file needs. One call either way: a second PreToolUse hook cost more than both of these together.
 text=$(printf '%s' "$payload" |
-  "$HOME/.agents/bin/agent" inject "$path" --session "$session" --edit 2>"$err") || rc=$?
+  "$AGENTS_CLI" inject "$path" --session "$session" --edit 2>"$err") || rc=$?
 
 # A non-zero exit with nothing on stderr is `inject` saying this file is already in context. With
 # something on stderr it is a real failure, which used to look exactly the same from here.

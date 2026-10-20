@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from conftest import agent, git
+from conftest import REPO, agent, checkout_home, git
 
 from agentkit import notes
 
@@ -60,7 +60,7 @@ def test_only_todo_and_its_parts_are_held_to_it(tmp_path):
     assert bool(notes.abandoned(path, BEFORE, without(BEFORE, "codex"))) == held
 
 
-def test_the_warning_arrives_every_time_and_the_person_sees_it(todo):
+def test_the_warning_arrives_every_time_and_the_person_sees_it(todo, tmp_path_factory):
   """The warning is about the edit, so session dedupe never swallows it, and the hook names it in systemMessage."""
   tool_input = {"file_path": str(todo), "old_string": BEFORE, "new_string": without(BEFORE, "codex")}
   session = f"archive-{uuid.uuid4().hex}"        # stamps outlive a run, and tmp dir names repeat
@@ -69,5 +69,5 @@ def test_the_warning_arrives_every_time_and_the_person_sees_it(todo):
   assert "removes 1 task" in first.stdout and "--- agent-notes" in first.stdout   # notes too, once
   assert "removes 1 task" in again.stdout and "--- agent-notes" not in again.stdout   # said again, while the standards stay deduped
 
-  output = json.loads(subprocess.run(["bash", str(Path(__file__).resolve().parent.parent / "hooks" / "inject.sh")], input=json.dumps({"session_id": f"archive-{uuid.uuid4().hex}", "tool_name": "Edit", "tool_input": tool_input}), capture_output=True, check=True, text=True, cwd=todo.parent.parent).stdout)
+  output = json.loads(subprocess.run(["bash", str(REPO / "hooks" / "inject.sh")], input=json.dumps({"session_id": f"archive-{uuid.uuid4().hex}", "tool_name": "Edit", "tool_input": tool_input}), capture_output=True, check=True, text=True, cwd=todo.parent.parent, env=checkout_home(tmp_path_factory.mktemp("hub"))).stdout)
   assert "a task leaving todo.md unarchived" in output["systemMessage"] and "removes 1 task" in output["hookSpecificOutput"]["additionalContext"]

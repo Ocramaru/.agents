@@ -6,6 +6,8 @@ kind: learned
 
 # Traps
 
+- **An editable install copies every `force-include`d file into the venv.** hatchling writes `agentkit/shipped/` into `.venv`'s site-packages beside the `.pth`, and nothing reads it: the checkout's package is the one imported, and `profile.INSTALLED` looks only beside it. `sources` cannot stand in, since it rewrites directory prefixes and not `AGENTS.md` or `config.toml`.
+
 - **`git ls-files` lists only tracked files.** `agent sub review` on a directory of new, not-yet-added files found nothing while an explicit `.py` path routed, in a repo whose package had never been committed. Discovery lists `--cached --others --exclude-standard`: new files count, `.gitignore` still holds.
 
 - **Per-test coverage cannot choose which tests to cut.** `pytest --cov` does not trace the tests that run `agent(...)` as a subprocess, so they look like they reach nothing, and Python 3.14's default core cannot record `--cov-context`; set `COVERAGE_CORE=ctrace`. A test is worth keeping if a mutation of the source fails it: apply the edit, run the test, revert.
@@ -16,7 +18,7 @@ kind: learned
 
 - **A conflicted merge in `~/.agents` breaks every agent's hooks until it is resolved.** A cherry-pick left conflict markers in `cli/sub.py`, and the guard failed to import in two sessions at once; it failed open, so nothing was blocked. Merge and cherry-pick in a worktree, then fast-forward.
 
-- **`uv run agent` in a worktree runs the installed hub, not the worktree.** The project declares no `agent` script, so uv falls through to `~/.local/bin/agent`, and a change looked like it did nothing. Try a worktree's CLI with `uv run python -m agentkit`.
+- **`uv run agent` in a worktree runs that worktree only because the project is a package.** With `package = false` there was no `agent` script in the venv, uv fell through to `~/.local/bin/agent`, the installed hub, and a change looked like it did nothing. `package = true` is load-bearing.
 
 - **A local model server is one process holding one model, and it fails like one.** Four concurrent calls during a 30B-to-8B swap took ollama down with `Connection refused`, it drops connections or returns 500 while it swaps, and it keeps a model's memory for its keep-alive after the last request (qwen3:8b held 17.5 GB for five minutes). Declare `parallel = 1`, retry a transport failure with a short backoff, and release the model when a review finishes.
 

@@ -1,5 +1,5 @@
-"""Wire this repo into the coding agents on this machine, and git into every repo that opts in.
-It links rather than copies, so `git pull` updates a machine without a reinstall, and `~/.agents/bin/agent install` needs nothing on PATH.
+"""Wire .agents into the coding agents on this machine, and git into every repo that opts in.
+A clone is linked, so `git pull` updates a machine without a reinstall; an install copies what agents name by path into ~/.agents, since a link into the tool's venv dangles when its Python changes.
 Anything in place that is not ours is moved aside rather than overwritten, and a second run changes nothing.
 
 Author: Marco Cassar (@Ocramaru)
@@ -9,12 +9,15 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from agentkit import profile as _profile
-from agentkit.profile import HUB
+from agentkit.profile import HOME, INSTALLED, SHIPPED
 
-GITHOOKS = HUB / "githooks"
+GITHOOKS = HOME / "githooks"
+CLI = Path(sys.executable).parent / "agent" if INSTALLED else SHIPPED / "bin" / "agent"   # the `agent` this code runs as, and the one hooks should find
+FIXED = ("AGENTS.md", "commands", "githooks", "hooks")   # what agents and git name by path under ~/.agents, so an install keeps a copy there
 POINTER = "The `.agents/` notes convention, the standards, and how they load:"
 
 
@@ -52,7 +55,7 @@ def point_at(file: Path) -> list[str]:
 
   The profile's comes last, so how you work refines the convention.
   """
-  hub, mine = f"@{HUB}/AGENTS.md", _profile.file("AGENTS.md")
+  hub, mine = f"@{HOME}/AGENTS.md", _profile.file("AGENTS.md")
   have = file.read_text(encoding="utf-8") if file.is_file() else ""
   add = ([] if hub in have else [hub]) + ([f"@{mine}"] if mine and f"@{mine}" not in have else [])
   if not add: return [f"ok    pointer in {home(file)}"]
@@ -88,7 +91,7 @@ def repoint(old: Path | None) -> list[str]:
 
 def hooks(settings: Path) -> list[str]:
   """Replace the hooks block in Claude Code's settings.json whole, leaving every other key as it was."""
-  ours = json.loads((HUB / "settings.hooks.json").read_text(encoding="utf-8"))
+  ours = json.loads((SHIPPED / "settings.hooks.json").read_text(encoding="utf-8"))
   try: data = json.loads(settings.read_text(encoding="utf-8")) if settings.is_file() else {}
   except ValueError: data = None
   if not isinstance(data, dict): return [f"skip  hooks block: {home(settings)} is not a JSON object, so it is left as it is; fix it and run this again"]
@@ -106,6 +109,13 @@ def hooks(settings: Path) -> list[str]:
   return out + ["wrote hooks block in settings.json"]
 
 
+def stale() -> list[Path]:
+  """The shipped files whose copy at its fixed path in ~/.agents is missing or differs; none in a clone, which is its own copy."""
+  if not INSTALLED: return []
+  return [source for name in FIXED for source in sorted([SHIPPED / name] if (SHIPPED / name).is_file() else (path for path in (SHIPPED / name).rglob("*") if path.is_file()))
+          if not ((copy := HOME / source.relative_to(SHIPPED)).is_file() and copy.read_bytes() == source.read_bytes())]
+
+
 def preflight() -> list[str]:
   """Problems that must stop the install before it writes anything. Empty means go ahead."""
   problems = []
@@ -117,10 +127,32 @@ def preflight() -> list[str]:
     problems.append(f"missing {', '.join(missing)} (on a Mac: brew install {' '.join(missing)})")
 
   here = Path.home() / ".agents"
-  if (here.exists() or here.is_symlink()) and here.resolve() != HUB:
+  if (here.exists() or here.is_symlink()) and here.resolve() != HOME.resolve():
     problems.append(f"{here} is something else, and every hook expects this repo there. "
-                    f"Move it aside and run this again. This repo is at {HUB}")
+                    f"Move it aside and run this again. This repo is at {HOME}")
+  if INSTALLED and (here / "agentkit").is_dir():
+    problems.append(f"{here} is a clone of .agents, and an install keeps its state there. Run the clone's own "
+                    "bin/agent install, or move it aside and bring back its profile/ and local.toml")
   return problems
+
+
+def keep() -> tuple[int, str]:
+  """Under uvx, install agentkit as a uv tool from where this copy came, so `agent` outlives the run: (0, the tool's `agent`), (0, "") outside uvx, or (1, why not).
+
+  The checks come first, so a machine the install would refuse is left without a tool too.
+  """
+  if not INSTALLED: return 0, ""
+  try: cache = subprocess.run(["uv", "cache", "dir"], capture_output=True, check=False, text=True).stdout.strip()
+  except FileNotFoundError: return 0, ""   # no uv, so no uvx either
+  if not (cache and Path(sys.prefix).resolve().is_relative_to(Path(cache).resolve())): return 0, ""   # uvx runs from an environment in uv's cache
+  if problems := preflight(): return 1, "\n".join(f"cannot install: {problem}" for problem in problems)
+
+  found = _profile.source()
+  vcs = found.get("vcs_info", {})
+  kept = subprocess.run(["uv", "tool", "install", f"agentkit @ {'git+' if vcs else ''}{found['url']}{'@' + vcs['requested_revision'] if vcs.get('requested_revision') else ''}" if found else "agentkit"], capture_output=True, check=False, text=True)
+  if kept.returncode: return 1, f"could not keep agentkit as a uv tool: {(kept.stderr.strip().splitlines() or ['uv said nothing'])[-1]}"
+  if not (tools := subprocess.run(["uv", "tool", "dir", "--bin"], capture_output=True, check=False, text=True).stdout.strip()): return 1, "kept agentkit as a uv tool, but `uv tool dir --bin` does not say where; run `agent install` from there"
+  return 0, str(Path(tools) / "agent")
 
 
 def run(targets: list[str], create: bool = False, profile: str | None = None) -> tuple[int, list[str]]:
@@ -139,17 +171,27 @@ def run(targets: list[str], create: bool = False, profile: str | None = None) ->
     lines += ["profile", f"  {said}", *(f"  {change}" for change in repoint(was))]
 
   here = Path.home() / ".agents"
-  if not here.exists():   # every hook and settings.json name ~/.agents, wherever the clone lives
-    here.symlink_to(HUB)
-    lines.append(f"  link  .agents -> {HUB}")
+  if INSTALLED:   # rewritten whenever they differ, so an upgrade carries its hooks
+    for source in (copies := stale()):
+      copy = HOME / source.relative_to(SHIPPED)
+      copy.parent.mkdir(parents=True, exist_ok=True)
+      shutil.copy(source, copy)
+    lines += ["hooks", f"  copy  {len(copies)} file{'s' if len(copies) != 1 else ''} into {home(HOME)}" if copies else f"  ok    hooks, githooks, commands and AGENTS.md in {home(HOME)}"]
+  elif not here.exists():   # every hook and settings.json name ~/.agents, wherever the clone lives
+    here.symlink_to(HOME)
+    lines += ["hub", f"  link  .agents -> {HOME}"]
 
-  for script in [*HUB.glob("hooks/*.sh"), HUB / "bin" / "agent", *GITHOOKS.glob("*")]:
+  for script in [*HOME.glob("hooks/*.sh"), CLI, *GITHOOKS.glob("*")]:
     if script.is_file(): script.chmod(script.stat().st_mode | 0o111)
 
   lines.append("bin")
-  lines += [f"  {change}" for change in link(HUB / "bin" / "agent", Path.home() / ".local" / "bin" / "agent")]
-  if str(Path.home() / ".local" / "bin") not in os.environ.get("PATH", "").split(os.pathsep):
-    lines.append(f"  note  {home(Path.home() / '.local' / 'bin')} is not on PATH; add it to type `agent`")
+  if INSTALLED:   # uv put the console script on PATH, and an install's hooks call whichever `agent` is first there
+    found = shutil.which("agent")
+    lines.append(f"  ok    {home(Path(found))}" if found and Path(found).resolve() == CLI.resolve() else f"  note  `agent` on PATH is {home(Path(found)) if found else 'missing'}, not {home(CLI)}; the hooks call that one, and `uv tool update-shell` puts uv's on PATH")
+  else:
+    lines += [f"  {change}" for change in link(CLI, Path.home() / ".local" / "bin" / "agent")]
+    if str(Path.home() / ".local" / "bin") not in os.environ.get("PATH", "").split(os.pathsep):
+      lines.append(f"  note  {home(Path.home() / '.local' / 'bin')} is not on PATH; add it to type `agent`")
 
   if not targets:
     targets = [target for target in INSTRUCTIONS if config_dir(target).is_dir()] or (list(INSTRUCTIONS) if create else [])
@@ -165,7 +207,7 @@ def run(targets: list[str], create: bool = False, profile: str | None = None) ->
     lines.append(f"{target} -> {home(directory)}")
     changes = []
     if target in COMMANDS:
-      changes += [line for command in sorted((HUB / "commands").glob("*.md"))
+      changes += [line for command in sorted((HOME / "commands").glob("*.md"))
                   for line in link(command, directory / COMMANDS[target] / command.name)]
     if target == "claude": changes += hooks(directory / "settings.json")
     changes += point_at(directory / INSTRUCTIONS.get(target, "AGENTS.md"))   # any other agent reads `~/.<name>/AGENTS.md`

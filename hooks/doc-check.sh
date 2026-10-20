@@ -13,7 +13,7 @@ session=$(printf '%s' "$payload" | jq -r '.session_id // "nosession"')
 git rev-parse --git-dir >/dev/null 2>&1 || exit 0
 git diff --quiet HEAD 2>/dev/null && exit 0
 
-out=$("$HOME/.agents/bin/agent" run doc-check --changed 2>/dev/null) || exit 0
+out=$("$AGENTS_CLI" run doc-check --changed 2>/dev/null) || exit 0
 summary=$(printf '%s' "$out" | jq -r '
   if .state == "input-required" then "doc-check asked: \(.body)"
   elif (.data.findings // [] | length) > 0 then

@@ -3,11 +3,11 @@
 Author: Marco Cassar (@Ocramaru)
 """
 
-import json, os, subprocess, uuid
+import json, subprocess, uuid
 from pathlib import Path
 
 import pytest
-from conftest import git, note
+from conftest import checkout_home, git, note
 
 HOOKS = Path(__file__).resolve().parent.parent / "hooks"
 TODO = "---\nname: todo\nkind: todo\n---\n\n# TODO\n\n- [ ] Something still open\n- [ ] And another\n"
@@ -27,11 +27,7 @@ class Hook:
 
   def __init__(self, tmp_path: Path):
     self.session, self.log = f"gate-{uuid.uuid4().hex}", tmp_path / "hooks.log"
-
-    (tmp_path / "home").mkdir(exist_ok=True)
-    if not (tmp_path / "home" / ".agents").exists(): (tmp_path / "home" / ".agents").symlink_to(HOOKS.parent)
-
-    self.environment = {**os.environ, "AGENTS_HOOK_LOG": str(self.log), "TMPDIR": str(tmp_path), "HOME": str(tmp_path / "home"), "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv")}
+    self.environment = checkout_home(tmp_path, AGENTS_HOOK_LOG=str(self.log))
 
   def run(self, path: Path, old: str = "a", new: str = "b") -> subprocess.CompletedProcess:
     payload = {"session_id": self.session, "tool_name": "Edit", "tool_input": {"file_path": str(path), "old_string": old, "new_string": new}}

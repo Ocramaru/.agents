@@ -5,6 +5,7 @@
 # `agent sub reviews --open` when they land. Installed per repo by `agent hook install`, which writes
 # a shim calling this, so a `git pull` in the hub updates the logic everywhere.
 set -euo pipefail
+. "$HOME/.agents/hooks/log.sh"
 
 agent="${1:-auto}"
 backend="${2:-}"
@@ -21,7 +22,7 @@ printf '\n=== %s %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$(git rev-parse --short H
 # Detach, so closing the terminal does not kill a review halfway. macOS has no setsid; nohup keeps
 # it alive through the hangup, which is the part that matters here.
 if command -v setsid >/dev/null 2>&1; then
-  AGENTS_HOOK=post-commit setsid "$HOME/.agents/bin/agent" "${args[@]}" >>"$log" 2>&1 </dev/null &
+  AGENTS_HOOK=post-commit setsid "$AGENTS_CLI" "${args[@]}" >>"$log" 2>&1 </dev/null &
 else
-  AGENTS_HOOK=post-commit nohup "$HOME/.agents/bin/agent" "${args[@]}" >>"$log" 2>&1 </dev/null &
+  AGENTS_HOOK=post-commit nohup "$AGENTS_CLI" "${args[@]}" >>"$log" 2>&1 </dev/null &
 fi

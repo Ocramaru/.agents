@@ -11,8 +11,8 @@ kind: context
 | section | line |
 |---|---|
 | Assumptions | 22 |
-| How the parts fit | 32 |
-| Changing it | 48 |
+| How the parts fit | 33 |
+| Changing it | 49 |
 
 <!-- /map -->
 
@@ -26,7 +26,8 @@ The hub: standards, notes and review, linked into every agent from `~/.agents`.
 | hooks | thin bash, logic in `agentkit`; stdlib only on the hook path |
 | deps | `duckdb` and `rich`, imported only where used |
 | models | subscription CLIs and local endpoints, nothing metered |
-| install | `agent install`; symlinks, and the hub answers at `~/.agents` |
+| install | `agent install`. A clone is linked and answers at `~/.agents`; an install (`uv tool install`) copies its hooks, githooks, commands and AGENTS.md there, and its hooks call `agent` on PATH |
+| paths | `profile.SHIPPED` is what ships, read-only; `profile.HOME` is this machine's state. A clone is both, so never assume they differ, nor that they are the same |
 | stores | append-only, uuid7 keys, one writer per duckdb file |
 
 ## How the parts fit

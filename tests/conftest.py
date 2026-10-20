@@ -1,6 +1,6 @@
 """What every test file needs: the repo on the path, no profile, a git repo, a note in it, a standard.
 
-The path insert and the profile switch-off live here because pytest imports this before any test module, and agentkit is not installed.
+The path insert and the profile switch-off live here because pytest imports this before any test module, so the checkout is what every test imports.
 
 Author: Marco Cassar (@Ocramaru)
 """
@@ -58,6 +58,13 @@ def agent(args: list[str], cwd: Path, expect: int | None = 0, env: dict | None =
   return result
 
 
+def checkout_home(directory: Path, **extra: str) -> dict:
+  """An environment for firing a hook under test: every hook sources $HOME/.agents, so HOME is made in `directory` with `.agents` linked to this checkout."""
+  (directory / "home").mkdir(exist_ok=True)
+  if not (directory / "home" / ".agents").exists(): (directory / "home" / ".agents").symlink_to(REPO)
+  return {**os.environ, "HOME": str(directory / "home"), "TMPDIR": str(directory), "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv"), **extra}
+
+
 @pytest.fixture
 def repo(tmp_path) -> Path:
   """A git repo with a note at the root and a module to edit: what an injection test needs."""
@@ -65,6 +72,41 @@ def repo(tmp_path) -> Path:
   note(tmp_path, "# r\n\nCTX")
   (tmp_path / "mod.py").write_text("x = 1\n")
   return tmp_path
+
+
+@pytest.fixture(scope="session")
+def wheel(tmp_path_factory) -> Path:
+  """agentkit built from this checkout as a wheel, once per run."""
+  out = tmp_path_factory.mktemp("wheel")
+  subprocess.run(["uv", "build", "--wheel", "--quiet", "--out-dir", str(out), str(REPO)], check=True, capture_output=True)
+  return next(out.glob("*.whl"))
+
+
+@pytest.fixture(scope="session")
+def installed(wheel, tmp_path_factory) -> Path:
+  """The wheel installed into a venv of its own, as `uv tool install` would: the `bin` holding its `agent`."""
+  venv = tmp_path_factory.mktemp("venv")
+  subprocess.run(["uv", "venv", "--quiet", "--python", sys.executable, str(venv)], check=True, capture_output=True)
+  subprocess.run(["uv", "pip", "install", "--quiet", "--python", str(venv / "bin" / "python"), str(wheel)], check=True, capture_output=True)
+  return venv / "bin"
+
+
+@pytest.fixture
+def machine(installed, tmp_path) -> dict:
+  """The environment of a machine with agentkit installed and nothing else: an empty HOME, uv's tools under tmp_path with their bin first on PATH, then the install; uv keeps this machine's cache and Python."""
+  return {key: value for key, value in os.environ.items() if key not in ("AGENTS_PROFILE", "AGENTS_HOOK_LOG", "PYTHONPATH", "CLAUDE_CONFIG_DIR")} | {"HOME": str(tmp_path / "home"), "TMPDIR": str(tmp_path), "UV_TOOL_DIR": str(tmp_path / "tools"), "UV_TOOL_BIN_DIR": str(tmp_path / "bin"), "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv"), "UV_PYTHON": sys.executable, "PATH": os.pathsep.join([str(tmp_path / "bin"), str(installed), os.environ["PATH"]])}
+
+
+@pytest.fixture
+def fresh(installed, machine, tmp_path):
+  """`agent` as installed on that machine, run from outside any checkout."""
+  (tmp_path / "elsewhere").mkdir()
+
+  def run(args: list[str], expect: int | None = 0, stdin: str | None = None) -> subprocess.CompletedProcess:
+    result = subprocess.run([str(installed / "agent"), *args], cwd=tmp_path / "elsewhere", capture_output=True, check=False, text=True, input=stdin, env=machine)
+    if expect is not None: assert result.returncode == expect, f"{args}\nout: {result.stdout}\nerr: {result.stderr}"
+    return result
+  return run
 
 
 @pytest.fixture

@@ -5,6 +5,7 @@ A title already open gets a comment rather than a second issue.
 Author: Marco Cassar (@Ocramaru)
 """
 
+import importlib.metadata
 import json
 import platform
 import re
@@ -13,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 from agentkit import tree, version
-from agentkit.profile import HUB, git
+from agentkit.profile import INSTALLED, SHIPPED, git
 
 
 def gh(*args: str) -> subprocess.CompletedProcess:
@@ -23,9 +24,10 @@ def gh(*args: str) -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(["gh", *args], 127, "", "gh is not installed: https://cli.github.com")
 
 
-def slug(hub: Path = HUB) -> str | None:
-  """owner/name for the hub's remote, from git rather than written down anywhere."""
-  match = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$", git(hub, "remote", "get-url", "origin").stdout.strip())
+def slug(hub: Path = SHIPPED) -> str | None:
+  """owner/name of the hub on GitHub: a clone's origin remote, or the Repository URL an install carries in its metadata."""
+  address = dict(entry.split(", ", 1) for entry in importlib.metadata.metadata("agentkit").get_all("Project-URL") or []).get("Repository", "") if INSTALLED else git(hub, "remote", "get-url", "origin").stdout.strip()
+  match = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$", address)
   return match.group(1) if match else None      # a failed call prints nothing, so it cannot match
 
 

@@ -1,3 +1,16 @@
 #!/usr/bin/env bash
-# The installer is `agent install` now; this stays so `./install.sh` still works.
-exec "$(cd -P "$(dirname "$0")" && pwd)/bin/agent" install "$@"
+# Install .agents as a uv tool, then wire it into this machine's agents; arguments go to `agent install`.
+# AGENTS_SOURCE installs from elsewhere, such as a release: git+https://github.com/Ocramaru/.agents@v0.2.0
+# Author: Marco Cassar (@Ocramaru)
+set -euo pipefail
+
+requirement="${AGENTS_SOURCE:-git+https://github.com/Ocramaru/.agents}"
+if ! command -v uv >/dev/null 2>&1; then echo "install uv first: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2; exit 1; fi
+if [[ "${1:-}" == "--dry-run" ]]; then printf 'would run: uv tool install %s\n           agent install %s\n' "$requirement" "${*:2}"; exit 0; fi
+
+uv tool install "$requirement"
+agent="$(uv tool dir --bin)/agent"
+
+# Piped from curl, stdin is this script: `agent install` gets the terminal, so it can ask about a profile
+if [[ ! -t 0 ]] && { : </dev/tty; } 2>/dev/null; then exec "$agent" install "$@" </dev/tty; fi
+exec "$agent" install "$@"

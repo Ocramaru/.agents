@@ -12,7 +12,7 @@ from pathlib import Path
 from agentkit import profile as _profile
 from agentkit.frontmatter import Doc, load
 
-GLOBAL = _profile.HUB / "standards"
+GLOBAL = _profile.SHIPPED / "standards"
 AUTO = object()   # the profile goes with the bundled set, and with nothing else
 
 

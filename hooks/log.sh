@@ -1,4 +1,4 @@
-# Sourced by every hook. One line per firing, so "did it fire" is answerable afterwards.
+# Sourced by every hook: one log line per firing, so "did it fire" is answerable afterwards, and which `agent` to call.
 #
 # A hook is silent by design: it either injects context the model never shows you, or it has
 # nothing to say. Those two look identical from the UI, and so does a hook that crashed. The log
@@ -8,6 +8,11 @@
 # edit, so every line here swallows its own errors.
 
 AGENTS_HOOK_LOG="${AGENTS_HOOK_LOG:-$HOME/.agents/.hooks.log}"
+
+# The CLI every hook calls: a clone's own bin/agent, or the console script an install put on PATH,
+# which starts without the `uv run` a clone pays. A builtin test, so no fork on every edit.
+AGENTS_CLI="$HOME/.agents/bin/agent"
+[[ -x "$AGENTS_CLI" ]] || AGENTS_CLI=agent
 
 hook_log() {  # hook_log <hook> <session> <what happened...>
   local hook="$1" session="${2:-nosession}"

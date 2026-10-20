@@ -19,7 +19,7 @@ The name is used for both, which matters when indexing.
 
 | | |
 |---|---|
-| **the hub** | this repo. Its parent holds `standards/` and `agents/`. One per machine, installed to `~/.agents` |
+| **the hub** | this repo, one per machine: a clone at `~/.agents`, or a `uv tool install` that keeps its state there. `root` in `agent manifest` holds `standards/` and `agents/` either way |
 | **note directories** | the per-directory convention. Any folder in any repo may hold one, containing `context.md`, `learned.md`, `todo.md` |
 
 `agent manifest --notes` flags which is which via `"hub": true`. A discovery pass that treats the hub as a note directory will index `standards/` twice.

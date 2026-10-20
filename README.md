@@ -7,19 +7,34 @@ This repo is public and ships a few starter standards. What is *yours* (your sta
 ## Install
 
 ```sh
-git clone https://github.com/Ocramaru/.agents ~/.agents
-~/.agents/bin/agent install
+uv tool install git+https://github.com/Ocramaru/.agents
+agent install
 ```
 
 That runs on the starters. With a profile of your own:
 
 ```sh
-~/.agents/bin/agent install --profile git@github.com:<you>/.agents.profile.git
+agent install --profile git@github.com:<you>/.agents.profile.git
 ```
 
-`--profile` takes a URL, which it clones to `~/.agents/profile`, or a directory, which it uses where it is. Either way it is remembered for this machine in `~/.agents/local.toml`, so it is passed once per machine and never again. Both `profile/` and `local.toml` are gitignored here: this repo never carries your content, and where your profile lives is a fact about one machine.
+`--profile` takes a URL, which it clones to `~/.agents/profile`, or a directory, which it uses where it is. Either way it is remembered for this machine in `~/.agents/local.toml`, so it is passed once per machine and never again. `~/.agents` is this machine's: the profile, `local.toml` and the hook log live there, and an upgrade never touches them.
 
-`bin/agent` finds its own repo, so the installer runs before anything is on PATH, and `uv` builds the venv on first use. With no arguments it wires up every agent whose config directory exists; name them to be explicit, or `--all` to create the directories. It symlinks rather than copies, checks `git` and `jq` before writing anything, and moves anything already in place to a `.bak` that never overwrites an older one. A second run reports `ok` for everything.
+With no arguments `agent install` wires up every agent whose config directory exists; name them to be explicit, or `--all` to create the directories. It copies the hooks, commands and `AGENTS.md` into `~/.agents`, where the agents' settings name them, checks `git` and `jq` before writing anything, and moves anything already in place to a `.bak` that never overwrites an older one. A second run reports `ok` for everything.
+
+[`install.sh`](install.sh) runs both steps, and says where to get uv if you have none: `curl -LsSf https://raw.githubusercontent.com/Ocramaru/.agents/main/install.sh | bash`. So does `uvx --from git+https://github.com/Ocramaru/.agents agent install`, which keeps `agent` installed as a uv tool once it is done.
+
+`agent --version` names the release, and `agent update` upgrades it and copies the new hooks into place. To stay on one release, install it by its tag: `uv tool install git+https://github.com/Ocramaru/.agents@<tag>`.
+
+### Working on .agents itself
+
+A clone is the way to change the hub:
+
+```sh
+git clone https://github.com/Ocramaru/.agents ~/.agents
+~/.agents/bin/agent install
+```
+
+`bin/agent` finds its own repo, so the installer runs before anything is on PATH, and `uv` builds the venv on first use. A clone is linked rather than copied, so `agent update` pulling it is the whole upgrade. Its `profile/` and `local.toml` are gitignored: this repo never carries your content.
 
 To have commits reviewed in repos that opt in:
 
@@ -115,9 +130,9 @@ agent doctor
 env -u PYTHONPATH uv run pytest tests/
 ```
 
-`doctor` covers what tests cannot: whether the hooks are registered here, whether `agent` resolves to this repo, whether a standard points at one that was renamed, whether a backend's CLI is installed, whether a note's map has drifted, and whether your profile is pushed. The suite runs only against temporary trees, so it never touches your install or your profile.
+`doctor` covers what tests cannot: whether the hooks are registered here and an install's copies of them are current, whether `agent` on PATH is this install or clone, whether a standard points at one that was renamed, whether a backend's CLI is installed, whether a note's map has drifted, and whether your profile is pushed. The suite runs only against temporary trees, so it never touches your install or your profile.
 
-agentkit is a uv project. `duckdb` is the one heavy dependency, and only `agent sub review` needs it; without uv, `bin/agent` falls back to plain `python3` and everything but reviews still works.
+agentkit is a uv project. `duckdb` is the one heavy dependency, and only `agent sub review` needs it; in a clone without uv, `bin/agent` falls back to plain `python3` and everything but reviews still works.
 
 ## Adding a standard
 

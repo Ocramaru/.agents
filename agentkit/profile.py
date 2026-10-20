@@ -5,6 +5,7 @@ Where it lives is this machine's, in the gitignored `local.toml`, which also tak
 Author: Marco Cassar (@Ocramaru)
 """
 
+import importlib.metadata
 import json
 import os
 import re
@@ -13,11 +14,20 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-HUB = Path(__file__).resolve().parent.parent
-CONFIG = HUB / "config.toml"   # what ships, and so every key's default
-LOCAL = HUB / "local.toml"
-TEMPLATES = HUB / "templates"   # what `agent init` and `agent profile init` write, one folder each
-DEFAULT = HUB / "profile"
+PACKAGE = Path(__file__).resolve().parent
+INSTALLED = (PACKAGE / "shipped").is_dir()   # a wheel carries the hub's files inside the package; a checkout has them beside it
+SHIPPED = PACKAGE / "shipped" if INSTALLED else PACKAGE.parent   # standards, agents, templates and hooks as released, replaced by an upgrade
+HOME = Path.home() / ".agents" if INSTALLED else PACKAGE.parent   # this machine's state and the hooks at their fixed paths; a clone is its own
+CONFIG = SHIPPED / "config.toml"   # what ships, and so every key's default
+LOCAL = HOME / "local.toml"
+TEMPLATES = SHIPPED / "templates"   # what `agent init` and `agent profile init` write, one folder each
+DEFAULT = HOME / "profile"
+
+
+def source() -> dict:
+  """Where uv installed agentkit from, as its direct_url.json records it: a `url`, with `vcs_info` for a git source; empty from an index."""
+  try: return json.loads(importlib.metadata.distribution("agentkit").read_text("direct_url.json") or "{}")
+  except (importlib.metadata.PackageNotFoundError, ValueError): return {}
 
 
 def path() -> Path | None:

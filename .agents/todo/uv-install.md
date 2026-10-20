@@ -69,12 +69,12 @@ Semver, starting at the first install. Bump `version` in `pyproject.toml` and ta
 
 ## Steps
 
-- [ ] Split `profile.HUB` into `SHIPPED` and `HOME`, and move every read to the right one.
-- [ ] `package = true`, the entry point, the wheel's data, and a build of the wheel in a test.
-- [ ] A test that installs the wheel into a throwaway venv and runs `agent --version`, `agent doctor` and `agent standards x.py` from outside any checkout, with `HOME` pointed at a temp directory.
-- [ ] `agent install` copies hooks and writes `settings.hooks.json` for an install; `doctor` checks it.
-- [ ] `agent update` and `version()` for both modes.
-- [ ] `install.sh` becomes `uv tool install ...` then `agent install`; README says so, with the clone as the dev path.
+- [x] Split `profile.HUB` into `SHIPPED` and `HOME`, and move every read to the right one.
+- [x] `package = true`, the entry point, the wheel's data, and a build of the wheel in a test.
+- [x] A test that installs the wheel into a throwaway venv and runs `agent --version`, `agent doctor` and `agent standards x.py` from outside any checkout, with `HOME` pointed at a temp directory.
+- [x] `agent install` copies hooks and writes `settings.hooks.json` for an install; `doctor` checks it.
+- [x] `agent update` and `version()` for both modes.
+- [x] `install.sh` becomes `uv tool install ...` then `agent install`; README says so, with the clone as the dev path.
 - [ ] `agent install` offers to make a profile, creates the private remote through `gh`, and takes `--profile new|URL|DIR|none`; a test runs it with no terminal and with a temp `HOME`.
 - [ ] Preflight the profile URL's reachability before the install writes anything.
 - [ ] `agent status`: one read-only screen of what this machine has. The version and whether it is a clone or an install; the profile, its remote and anything unpushed; the default backend, its models and the roles each reviewer asks for; counts of standards (hub, profile, repo), reviewers and note directories on the path from here; open review findings here; whether the Claude hooks and git's `core.hooksPath` are in place; hook errors since `.agents` last changed. `doctor` judges and `status` describes, so the two never repeat each other's lines, and `agent profile` stays for the profile alone.

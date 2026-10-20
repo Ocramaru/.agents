@@ -10,7 +10,7 @@ from agentkit import notes, profile as _profile, tree
 from agentkit.frontmatter import Doc, load
 from agentkit.standards import Library
 
-AGENTS = _profile.HUB / "agents"
+AGENTS = _profile.SHIPPED / "agents"
 
 
 def definitions(root: Path = AGENTS) -> dict[str, Doc]:

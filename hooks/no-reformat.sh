@@ -11,7 +11,7 @@ session=$(printf '%s' "$payload" | jq -r '.session_id // "nosession"')
 [ -n "$command" ] || exit 0
 
 rc=0
-found=$("$HOME/.agents/bin/agent" guard "$command" 2>/dev/null) || rc=$?
+found=$("$AGENTS_CLI" guard "$command" 2>/dev/null) || rc=$?
 if [ "$rc" -eq 0 ]; then
   hook_log no-reformat "$session" "allow  $(printf '%s' "$command" | head -c 80 | tr '\n' ' ')"
   exit 0
