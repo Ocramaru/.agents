@@ -6,13 +6,15 @@ Author: Marco Cassar (@Ocramaru)
 """
 
 import argparse
+import os
 import subprocess
 import tomllib
 from pathlib import Path
 
 import pytest
+from conftest import agent
 
-from agentkit import agents, backends, cli, install, profile
+from agentkit import agents, backends, cli, doctor, install, profile
 from agentkit.standards import Library
 
 
@@ -157,3 +159,25 @@ def test_a_profile_is_adopted_checked_for_drift_updated_and_made(isolated, monke
 
   monkeypatch.setattr(profile.subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 1))
   assert ".git" not in profile.init(isolated / "failed")
+
+
+def test_doctor_fails_a_public_profile_remote_and_profile_names_a_missing_one(isolated, monkeypatch):
+  """doctor asks gh whether a profile's GitHub remote is private and fails it when public; `agent profile` says when there is no remote at all."""
+  mine, fake = isolated / "mine", isolated / "fake"
+  profile.git(isolated, "init", "-q", "-b", "main", str(mine))
+  monkeypatch.setenv("AGENTS_PROFILE", str(mine))
+  monkeypatch.chdir(isolated)
+  said = agent(["profile"], cwd=isolated).stdout
+  assert "no remote, so no other machine gets it" in said and "no upstream" not in said
+
+  fake.mkdir()
+  (fake / "gh").write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$GH_LOG"\n[[ "$1 $2" == "repo view" ]] && { echo "$GH_PRIVATE"; exit 0; }\nexit 1\n')
+  (fake / "gh").chmod(0o755)
+  monkeypatch.setenv("PATH", f"{fake}{os.pathsep}{os.environ['PATH']}")
+  monkeypatch.setenv("GH_LOG", str(isolated / "gh.log"))
+  profile.git(mine, "remote", "add", "origin", "git@github.com:someone/.agents.profile.git")
+  assert "no remote" not in agent(["profile"], cwd=isolated).stdout
+  for private in ("true", "false"):
+    monkeypatch.setenv("GH_PRIVATE", private)
+    assert [passed for passed, label, _ in doctor.checks() if label == "profile remote someone/.agents.profile is private"] == [private == "true"]
+  assert "repo view someone/.agents.profile --json isPrivate" in (isolated / "gh.log").read_text()

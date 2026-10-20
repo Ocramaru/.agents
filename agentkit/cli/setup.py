@@ -20,22 +20,50 @@ exec "$HOME/.agents/hooks/post-commit.sh" {{agent}} {{backend}}
 """
 
 
-@command("install", help="wire this repo into the agents on this machine")
+PROFILE_QUESTION = """No profile on this machine. A profile is your own private repo of standards and settings, layered over the starters.
+  new   make one at {default}
+  URL   clone yours, made on another machine
+  DIR   use a directory where it is
+  none  use the starters, and stop asking"""
+
+
+def ask(question: str) -> str:
+  """One line typed at the terminal, stripped; empty when there is nothing to read."""
+  try: return input(question).strip()
+  except EOFError: return ""
+
+
+@command("install", help="wire .agents into the agents on this machine")
 @arg("targets", nargs="*", help="claude, codex, gemini, or any name (default: whichever exist)")
 @arg("--all", action="store_true", help="create config directories that do not exist yet")
-@arg("--profile", metavar="URL|DIR", help="your private profile: cloned to ~/.agents/profile, or used where it is")
+@arg("--profile", metavar="new|URL|DIR|none", help="your private profile: make one, clone yours, use a directory, or none (default: ask, given a terminal)")
 def cmd_install(args) -> int:
-  code, kept = install.keep()
+  code, kept = install.keep(args.profile)
   if code: return fail(kept)
   if kept:   # the tool does the install, so the hooks copied are the ones it will keep
     line(f"keep  agentkit as a uv tool: {kept}")
     os.execve(kept, [kept, *sys.argv[1:]], os.environ | {"PATH": os.pathsep.join(entry for entry in os.environ.get("PATH", "").split(os.pathsep) if Path(entry).resolve() != (Path(sys.prefix) / "bin").resolve())})   # without uvx's own environment, which leads PATH
 
-  code, lines = install.run(args.targets, create=args.all, profile=args.profile)
-  if code == 0 and not install.global_hooks_path():
-    lines += ["", "Optional: review every commit in repos that have a .agents/", "  agent hook install --global"]
-  if code == 0: lines += ["", "Done. Restart the agent to pick up the changes."]
-  return done(*lines, code=code)
+  answer = args.profile
+  if answer is None and profile.path() is None and profile.chosen() is None and sys.stdin.isatty() and issue.login():   # once, as every answer is recorded; a profile wants a private GitHub repo, so the question waits for gh
+    line(PROFILE_QUESTION.format(default=install.home(profile.DEFAULT)))
+    answer = ask("profile [new]: ") or "new"
+
+  code, lines = install.run(args.targets, create=args.all, profile=answer)
+  done(*lines)
+  if code: return code
+
+  if answer == "new" and not profile.git(profile.DEFAULT, "remote").stdout.strip():   # a profile reaches other machines only once pushed
+    login = issue.login()
+    if login and sys.stdin.isatty() and ask(f"\nMake {login}/.agents.profile on GitHub, private, and push your profile there? [y/N] ").lower() in ("y", "yes"):   # it publishes, so it asks
+      made = issue.gh("repo", "create", f"{login}/.agents.profile", "--private", "--source", str(profile.DEFAULT), "--remote", "origin", "--push")
+      line(f"  made  {login}/.agents.profile, private, and pushed" if made.returncode == 0 else f"  FAIL  {(made.stderr.strip().splitlines() or ['gh said nothing'])[-1]}")
+    if not profile.git(profile.DEFAULT, "remote").stdout.strip():
+      done("", "Push your profile somewhere private, so your other machines get it:", f"  git -C {profile.DEFAULT} remote add origin git@github.com:{login or '<you>'}/.agents.profile.git", f"  git -C {profile.DEFAULT} push -u origin main")
+
+  return done(*(["", "No profile chosen: `agent install --profile new|URL|DIR|none`, or run it at a terminal with gh logged in to be asked."] if profile.path() is None and profile.chosen() is None else []),
+              *(["", "Optional: review every commit in repos that have a .agents/", "  agent hook install --global"] if not install.global_hooks_path() else []),
+              "", "Done. Restart the agent to pick up the changes.")
 
 
 @command("hook", help="review commits: in this repo, or in every repo that has a .agents/")
@@ -154,7 +182,8 @@ def cmd_profile_status(args) -> int:
   origin = profile.git(where, "remote", "get-url", "origin").stdout.strip()
   return done(f"profile  {where}" + (f"  ({origin})" if origin else ""),
               *(f"  {part:<14} {len(list(path.glob('*.md')))} file(s)" if path.is_dir() else f"  {part}" for part, path in [(part, where / part) for part in ("standards", "agents", "config.toml", "AGENTS.md")] if path.exists()),
-              *(f"  !  {drift}" for drift in profile.drift(where)))
+              *([] if origin else [f"  !  no remote, so no other machine gets it: git -C {where} remote add origin <a private repo>, then push"]),
+              *(f"  !  {drift}" for drift in profile.drift(where) if origin or not drift.startswith("no upstream")))   # with no remote at all, that says it
 
 
 @command("init", help="make a new, empty profile to put your own standards in", group="profile")

@@ -5,6 +5,7 @@ A title already open gets a comment rather than a second issue.
 Author: Marco Cassar (@Ocramaru)
 """
 
+import functools
 import importlib.metadata
 import json
 import platform
@@ -24,9 +25,20 @@ def gh(*args: str) -> subprocess.CompletedProcess:
     return subprocess.CompletedProcess(["gh", *args], 127, "", "gh is not installed: https://cli.github.com")
 
 
+@functools.cache
+def login() -> str:
+  """The GitHub account gh is logged in as; empty when gh is missing or not logged in."""
+  user = gh("api", "user", "--jq", ".login")
+  return user.stdout.strip() if user.returncode == 0 else ""
+
+
 def slug(hub: Path = SHIPPED) -> str | None:
   """owner/name of the hub on GitHub: a clone's origin remote, or the Repository URL an install carries in its metadata."""
-  address = dict(entry.split(", ", 1) for entry in importlib.metadata.metadata("agentkit").get_all("Project-URL") or []).get("Repository", "") if INSTALLED else git(hub, "remote", "get-url", "origin").stdout.strip()
+  return named(dict(entry.split(", ", 1) for entry in importlib.metadata.metadata("agentkit").get_all("Project-URL") or []).get("Repository", "") if INSTALLED else git(hub, "remote", "get-url", "origin").stdout.strip())
+
+
+def named(address: str) -> str | None:
+  """owner/name from a remote's URL or scp-style address, or None when it names no repo."""
   match = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?/?$", address)
   return match.group(1) if match else None      # a failed call prints nothing, so it cannot match
 

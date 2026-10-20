@@ -95,6 +95,11 @@ def checks() -> list[tuple[bool, str, str]]:
     out.append((where.is_dir(), f"profile at {where}", "agent profile use <dir>, or fix the path in local.toml"))
     for problem in profile.drift(where) if where.is_dir() else []: out.append((False, f"profile: {problem}", "agent update" if "behind" in problem else f"commit and push in {where}, or your other machines miss it"))
 
+    # a profile holds how you work and your models, so its repo is private; gh can say so only for GitHub
+    origin = profile.git(where, "remote", "get-url", "origin").stdout.strip() if where.is_dir() else ""
+    if "github.com" in origin and (repository := issue.named(origin)) and (seen := issue.gh("repo", "view", repository, "--json", "isPrivate", "--jq", ".isPrivate")).returncode == 0:
+      out.append((seen.stdout.strip() == "true", f"profile remote {repository} is private", f"it is public, and a profile holds how you work and your models: gh repo edit {repository} --visibility private --accept-visibility-change-consequences"))
+
   out.append((importlib.util.find_spec("duckdb") is not None, "duckdb present, reviews can be kept", "`uv sync` in ~/.agents; everything but `agent sub review` works without it"))
 
   for agents_dir in note_dirs:

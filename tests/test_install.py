@@ -3,7 +3,7 @@
 Author: Marco Cassar (@Ocramaru)
 """
 
-import json, os, shutil, subprocess, sys, tomllib, uuid, zipfile
+import json, os, select, shutil, signal, subprocess, sys, tomllib, uuid, zipfile
 from pathlib import Path
 
 import pytest
@@ -20,6 +20,34 @@ def home(tmp_path, monkeypatch):
   monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
   monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
   return tmp_path / "home"
+
+
+FAKE_GH = """#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$GH_LOG"
+case "$1 $2" in
+  "api user") echo tester ;;
+  "repo create") git init -q --bare "$GH_REMOTE" && git -C "$6" remote add origin "$GH_REMOTE" && git -C "$6" push -q -u origin main ;;
+  *) exit 1 ;;
+esac
+"""
+
+
+def typed(command: list[str], answers: str, environment: dict, cwd: Path) -> tuple[int, str]:
+  """Run `command` on a pseudo-terminal with `answers` typed ahead, returning its exit code and everything the terminal showed, the echoed answers included."""
+  main, secondary = os.openpty()
+  process = subprocess.Popen(command, stdin=secondary, stdout=secondary, stderr=secondary, cwd=cwd, env=environment, start_new_session=True)
+  os.close(secondary)
+  os.write(main, answers.encode())
+
+  shown = b""
+  while select.select([main], [], [], 30)[0]:   # a prompt left waiting fails the test rather than hanging it
+    try: chunk = os.read(main, 65536)
+    except OSError: break   # the process closed its end
+    if not chunk: break
+    shown += chunk
+  os.close(main)
+  if process.poll() is None: os.killpg(process.pid, signal.SIGKILL)   # its own session, so whatever it started goes too
+  return process.wait(), shown.decode(errors="replace")
 
 
 def commit(repo: Path, blocked: bool = False) -> list[str]:
@@ -138,7 +166,7 @@ def test_update_upgrades_an_install_through_uv_and_lands_the_new_hooks(machine, 
     (source / name).parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(REPO / name, source / name)
   subprocess.run(["uv", "tool", "install", "--quiet", str(source)], capture_output=True, check=True, env=machine)
-  agent = lambda *args: subprocess.run([str(tmp_path / "bin" / "agent"), *args], capture_output=True, check=True, cwd=tmp_path, env=machine, text=True).stdout
+  agent = lambda *args: subprocess.run([str(tmp_path / "bin" / "agent"), *args], capture_output=True, check=True, cwd=tmp_path, env=machine, stdin=subprocess.DEVNULL, text=True).stdout
   (home / ".claude").mkdir(parents=True)
   agent("install")
   assert f"already current at {number}" in agent("update")
@@ -159,7 +187,7 @@ def test_an_install_through_uvx_keeps_agentkit_as_a_tool_and_installs_from_it(wh
   """`uvx --from <wheel> agent install` leaves `agent` installed as a uv tool, and the install that ran is that tool's, so its hooks call it."""
   home = Path(machine["HOME"])
   (home / ".claude").mkdir(parents=True)
-  ran = subprocess.run(["uvx", "--from", str(wheel), "agent", "install"], capture_output=True, check=True, cwd=tmp_path, env=machine, text=True).stdout
+  ran = subprocess.run(["uvx", "--from", str(wheel), "agent", "install"], capture_output=True, check=True, cwd=tmp_path, env=machine, stdin=subprocess.DEVNULL, text=True).stdout
   assert ran.startswith("keep  agentkit as a uv tool") and (tmp_path / "bin" / "agent").is_file()
   assert f"  ok    {tmp_path / 'bin' / 'agent'}" in ran and (home / ".agents" / "hooks" / "inject.sh").is_file()   # the `agent` on PATH is the one that installed
 
@@ -170,6 +198,74 @@ def test_install_sh_installs_the_tool_then_wires_the_machine_and_reruns_cleanly(
   run = lambda: subprocess.run(["bash", str(REPO / "install.sh")], capture_output=True, check=True, cwd=tmp_path, env=machine | {"AGENTS_SOURCE": str(wheel)}, start_new_session=True, stdin=subprocess.DEVNULL, text=True).stdout   # no terminal to hand over
   assert "wrote hooks block in settings.json" in run() and (tmp_path / "bin" / "agent").is_file()
   assert not {line.split()[0] for line in run().splitlines() if line.strip()} & {"copy", "link", "saved", "wrote", "point"}
+
+
+def test_install_asks_for_a_profile_once_and_only_at_a_terminal_with_gh_logged_in(fresh, installed, machine, tmp_path):
+  """With no profile chosen, install asks only given a terminal and gh logged in, records whatever is answered, and never asks again."""
+  home, fake = Path(machine["HOME"]), tmp_path / "fake"
+  (home / ".claude").mkdir(parents=True)
+  quiet = fresh(["install"]).stdout
+  assert "profile [new]" not in quiet and "No profile chosen" in quiet and not (home / ".agents" / "local.toml").exists()
+  code, shown = typed([str(installed / "agent"), "install"], "", machine, tmp_path)
+  assert code == 0 and "profile [new]" not in shown and "No profile chosen" in shown   # no gh yet, so the question waits
+
+  fake.mkdir()
+  (fake / "gh").write_text(FAKE_GH)
+  (fake / "gh").chmod(0o755)
+  machine.update({"PATH": f"{fake}{os.pathsep}{machine['PATH']}", "GH_LOG": str(tmp_path / "gh.log")})
+
+  code, shown = typed([str(installed / "agent"), "install"], "none\n", machine, tmp_path)
+  assert code == 0 and "profile [new]:" in shown and tomllib.loads((home / ".agents" / "local.toml").read_text())["profile"]["path"] == ""
+  code, shown = typed([str(installed / "agent"), "install"], "", machine, tmp_path)
+  assert code == 0 and "profile [new]" not in shown and "No profile chosen" not in shown
+
+
+def test_every_profile_answer_works_from_the_flag_at_a_terminal_or_not(fresh, installed, machine, tmp_path):
+  """A URL is cloned and a directory used, at a terminal or not, and none is recorded; the flag is never asked about again."""
+  home, bare, clone, directory = Path(machine["HOME"]), tmp_path / "mine.git", tmp_path / "mine", tmp_path / "dotfiles"
+  (home / ".claude").mkdir(parents=True)
+  directory.mkdir()
+  for command in (["git", "init", "-q", "--bare", "-b", "main", str(bare)], ["git", "clone", "-q", str(bare), str(clone)], ["git", "-C", str(clone), "commit", "-q", "--allow-empty", "-m", "first"], ["git", "-C", str(clone), "push", "-q", "origin", "main"]): subprocess.run(command, capture_output=True, check=True, env=machine)
+  chosen = lambda: tomllib.loads((home / ".agents" / "local.toml").read_text())["profile"]["path"]
+
+  code, shown = typed([str(installed / "agent"), "install", "--profile", str(bare)], "", machine, tmp_path)
+  assert code == 0 and "profile [new]" not in shown and (home / ".agents" / "profile" / ".git").is_dir() and chosen() == str((home / ".agents" / "profile").resolve())
+  fresh(["install", "--profile", str(directory)])
+  assert chosen() == str(directory.resolve())
+  fresh(["install", "--profile", "none"])
+  assert chosen() == ""
+
+
+def test_a_new_profile_is_made_and_published_privately_through_gh_only_when_asked(fresh, installed, machine, tmp_path):
+  """`new` makes and commits a profile; with no terminal, or no yes, it prints the git commands, and given a yes at a terminal gh makes the repo private and pushes."""
+  home, fake = Path(machine["HOME"]), tmp_path / "fake"
+  (home / ".claude").mkdir(parents=True)
+  fake.mkdir()
+  (fake / "gh").write_text(FAKE_GH)
+  (fake / "gh").chmod(0o755)
+  machine.update({"PATH": f"{fake}{os.pathsep}{machine['PATH']}", "GH_LOG": str(tmp_path / "gh.log"), "GH_REMOTE": str(tmp_path / "remote.git")})
+  made = home / ".agents" / "profile"
+
+  said = fresh(["install", "--profile", "new"]).stdout
+  assert "a first commit" in said and f"git -C {made} push -u origin main" in said and "Make tester" not in said and (made / "standards").is_dir()
+  assert "repo create" not in (tmp_path / "gh.log").read_text()   # no terminal, so never asked
+  code, shown = typed([str(installed / "agent"), "install", "--profile", "new"], "\n", machine, tmp_path)
+  assert code == 0 and "Make tester/.agents.profile on GitHub, private" in shown and "repo create" not in (tmp_path / "gh.log").read_text()   # the default is no
+
+  code, shown = typed([str(installed / "agent"), "install", "--profile", "new"], "y\n", machine, tmp_path)
+  assert code == 0 and "made  tester/.agents.profile, private, and pushed" in shown and "push -u origin main" not in shown
+  assert f"repo create tester/.agents.profile --private --source {made} --remote origin --push" in (tmp_path / "gh.log").read_text()
+  assert subprocess.run(["git", "-C", str(made), "status", "-sb"], capture_output=True, check=True, text=True).stdout.startswith("## main...origin/main\n")
+
+
+def test_a_profile_url_that_cannot_be_reached_stops_the_install_before_it_changes_anything(wheel, fresh, machine, tmp_path):
+  """An unreachable profile URL is refused before anything is written, run directly or through uvx, which then keeps no tool either."""
+  home, nowhere = Path(machine["HOME"]), str(tmp_path / "nowhere.git")
+  (home / ".claude").mkdir(parents=True)
+  assert "cannot reach" in fresh(["install", "--profile", nowhere], expect=1).stdout
+  ran = subprocess.run(["uvx", "--from", str(wheel), "agent", "install", "--profile", nowhere], capture_output=True, check=False, cwd=tmp_path, env=machine, stdin=subprocess.DEVNULL, text=True)
+  assert ran.returncode == 1 and "cannot reach" in ran.stderr and not (tmp_path / "bin" / "agent").exists()
+  assert not (home / ".agents").exists() and list((home / ".claude").iterdir()) == []
 
 
 def test_the_global_hook_turns_on_and_off_but_never_replaces_someone_elses(home):

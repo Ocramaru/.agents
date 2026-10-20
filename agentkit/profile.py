@@ -34,12 +34,15 @@ def path() -> Path | None:
   """The profile in force; `AGENTS_PROFILE=""` means none, which keeps a test off the machine's."""
   override = os.environ.get("AGENTS_PROFILE")
   if override is not None: return Path(override).expanduser() if override else None
-
-  try: local = tomllib.loads(LOCAL.read_text(encoding="utf-8")) if LOCAL.is_file() else {}   # this machine's install
-  except tomllib.TOMLDecodeError: local = {}      # a broken local file is no profile, not a crash
-  saved = local.get("profile", {}).get("path")
-  if saved: return Path(saved).expanduser()
+  if (saved := chosen()) is not None: return Path(saved).expanduser() if saved else None
   return DEFAULT if DEFAULT.is_dir() else None
+
+
+def chosen() -> str | None:
+  """The profile this machine's local.toml records: a path, `""` for a choice of none, or None when it records no choice."""
+  try: local = tomllib.loads(LOCAL.read_text(encoding="utf-8")) if LOCAL.is_file() else {}
+  except tomllib.TOMLDecodeError: local = {}      # a broken local file is no profile, not a crash
+  return local.get("profile", {}).get("path")
 
 
 def file(name: str) -> Path | None:
@@ -58,12 +61,12 @@ def section(name: str, repo: Path | None = None, add: tuple[str, ...] = ()) -> d
   return settings
 
 
-def save(where: Path) -> None:
-  """Record this machine's profile, changing only the `path` line so the rest stays as written.
+def save(where: Path | None) -> None:
+  """Record this machine's profile, or an empty path for none, changing only the `path` line so the rest stays as written.
 
   JSON's string escaping is TOML's, so any path is quoted validly.
   """
-  line = f"path = {json.dumps(str(Path(where).expanduser().resolve()))}"
+  line = f"path = {json.dumps(str(Path(where).expanduser().resolve()) if where else '')}"
   text = LOCAL.read_text(encoding="utf-8") if LOCAL.is_file() else HEADER
   table = re.search(r"(?ms)^\[profile\][ \t]*(?:#[^\n]*)?\n(.*?)(?=^\[|\Z)", text)
 
@@ -80,8 +83,17 @@ HEADER = "# This machine's install. Not tracked: where your profile lives is loc
 
 
 def adopt(source: str) -> tuple[int, str]:
-  """Make `source` this machine's profile: clone it if it is a URL, then remember where it is."""
-  if not ("://" in source or source.endswith(".git") or (":" in source and "@" in source.split(":")[0])):   # scp-style too
+  """Make `source` this machine's profile and remember it: `new` makes one at the default path, `none` records that there is none, a URL is cloned and a directory used where it is."""
+  if source == "none":
+    save(None)
+    return 0, "set   no profile: the starters in .agents are in use, and install stops asking"
+
+  if source == "new":
+    made = init(DEFAULT)
+    save(DEFAULT)
+    return 0, f"made  profile at {DEFAULT}: {', '.join(made)}" if made else f"ok    profile at {DEFAULT}"
+
+  if not remote(source):
     where = Path(source).expanduser()
     if not where.is_dir(): return 1, f"no profile at {where}"
     save(where)
@@ -97,6 +109,11 @@ def adopt(source: str) -> tuple[int, str]:
   if result.returncode: return 1, f"could not clone {source}: {result.stderr.strip()}"
   save(DEFAULT)
   return 0, f"clone profile {source} -> {DEFAULT}"
+
+
+def remote(source: str) -> bool:
+  """Whether a profile answer names a repo to clone rather than a directory: a URL, an scp-style address, or a path ending .git."""
+  return "://" in source or source.endswith(".git") or (":" in source and "@" in source.split(":")[0])
 
 
 def git(where: Path, *args: str) -> subprocess.CompletedProcess:
@@ -135,7 +152,7 @@ def init(where: Path) -> list[str]:
       made.append(template.name)
 
   # nested in the .agents clone is fine, .agents ignores it; and .git only if init worked
-  if not (where / ".git").exists() and subprocess.run(["git", "init", "-q", "-b", "main", str(where)],
-                                                      check=False).returncode == 0:
+  if not (where / ".git").exists() and subprocess.run(["git", "init", "-q", "-b", "main", str(where)], check=False).returncode == 0:
     made.append(".git")
+    if git(where, "add", "-A").returncode == 0 and git(where, "commit", "-qm", "Start a profile").returncode == 0: made.append("a first commit, so it can be pushed")
   return made

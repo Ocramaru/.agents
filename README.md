@@ -11,13 +11,13 @@ uv tool install git+https://github.com/Ocramaru/.agents
 agent install
 ```
 
-That runs on the starters. With a profile of your own:
+At a terminal with `gh` logged in, the first install asks about a [profile](#your-profile), your own standards and settings kept in a private repo; on every machine after the first, hand it yours:
 
 ```sh
 agent install --profile git@github.com:<you>/.agents.profile.git
 ```
 
-`--profile` takes a URL, which it clones to `~/.agents/profile`, or a directory, which it uses where it is. Either way it is remembered for this machine in `~/.agents/local.toml`, so it is passed once per machine and never again. `~/.agents` is this machine's: the profile, `local.toml` and the hook log live there, and an upgrade never touches them.
+`~/.agents` is this machine's: the profile, `local.toml` and the hook log live there, and an upgrade never touches them.
 
 With no arguments `agent install` wires up every agent whose config directory exists; name them to be explicit, or `--all` to create the directories. It copies the hooks, commands and `AGENTS.md` into `~/.agents`, where the agents' settings name them, checks `git` and `jq` before writing anything, and moves anything already in place to a `.bak` that never overwrites an older one. A second run reports `ok` for everything.
 
@@ -46,16 +46,9 @@ That sets git's `core.hooksPath` to [`githooks/`](githooks), whose dispatcher ru
 
 ## Your profile
 
-Make one, put your standards in it, and push it somewhere private:
+`agent install` makes one the first time it runs at a terminal with `gh` logged in; without `gh` the question waits until it is. Answer `new` and it lays out `~/.agents/profile`, commits it, and offers to make `<you>/.agents.profile` on GitHub, private, and push it there; it publishes only on a yes. `--profile new` without `gh` makes it all the same and prints the two git commands to push it. On every other machine, `agent install --profile <url>` and you are done.
 
-```sh
-agent profile init --use
-cd ~/.agents/profile
-git remote add origin git@github.com:<you>/.agents.profile.git
-git push -u origin main
-```
-
-`init` lays out the directories `.agents` reads and starts a git repo; `--use` makes it this machine's. On every other machine, `agent install --profile <url>` and you are done.
+`--profile` answers the question for a script, or for a machine with no terminal, where install never asks: `new`, a URL to clone to `~/.agents/profile`, a directory to use where it is, or `none` to stay on the starters. The answer is kept in `~/.agents/local.toml`, so a machine is asked once. `agent profile use <dir-or-url>` switches later, and `agent profile init <dir> --use` makes one somewhere else.
 
 | | |
 |---|---|

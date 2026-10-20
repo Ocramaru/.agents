@@ -55,7 +55,7 @@ uvx --from git+https://github.com/Ocramaru/.agents agent install
 uvx --from git+https://github.com/Ocramaru/.agents agent install --profile git@github.com:<you>/.agents.profile.git
 ```
 
-- **Prompt once.** With no profile set and a terminal, the install asks whether to make a private one, from `templates/profile`, with `git init`. `--profile new|URL|DIR|none` answers it for a script, and with no terminal it never prompts. Rerunning is safe.
+- **Prompt once.** With no profile set, a terminal and `gh` logged in, the install asks whether to make a private one, from `templates/profile`, with `git init`; without `gh` the question waits for a later install. `--profile new|URL|DIR|none` answers it for a script, and with no terminal it never prompts. Rerunning is safe.
 - **Create the remote.** With `gh` logged in, offer `gh repo create <you>/.agents.profile --private --source ~/.agents/profile --push`. It publishes, so it asks, defaults to `--private`, and without `gh` prints the two git commands instead.
 - **Keep the tool.** The install ends with `uv tool install`, so `agent` stays on PATH after `uvx` exits.
 - **State is separate.** The profile is in `~/.agents/profile`, which an upgrade never touches. `local.toml` records where it is.
@@ -75,10 +75,10 @@ Semver, starting at the first install. Bump `version` in `pyproject.toml` and ta
 - [x] `agent install` copies hooks and writes `settings.hooks.json` for an install; `doctor` checks it.
 - [x] `agent update` and `version()` for both modes.
 - [x] `install.sh` becomes `uv tool install ...` then `agent install`; README says so, with the clone as the dev path.
-- [ ] `agent install` offers to make a profile, creates the private remote through `gh`, and takes `--profile new|URL|DIR|none`; a test runs it with no terminal and with a temp `HOME`.
-- [ ] Preflight the profile URL's reachability before the install writes anything.
+- [x] `agent install` offers to make a profile, creates the private remote through `gh`, and takes `--profile new|URL|DIR|none`; a test runs it with no terminal and with a temp `HOME`.
+- [x] Preflight the profile URL's reachability before the install writes anything.
 - [ ] `agent status`: one read-only screen of what this machine has. The version and whether it is a clone or an install; the profile, its remote and anything unpushed; the default backend, its models and the roles each reviewer asks for; counts of standards (hub, profile, repo), reviewers and note directories on the path from here; open review findings here; whether the Claude hooks and git's `core.hooksPath` are in place; hook errors since `.agents` last changed. `doctor` judges and `status` describes, so the two never repeat each other's lines, and `agent profile` stays for the profile alone.
-- [ ] `doctor` warns on a public profile remote, and `agent profile` on a missing one.
+- [x] `doctor` warns on a public profile remote, and `agent profile` on a missing one.
 - [ ] Ask which backend this machine has on first run and write it to the profile's `config.toml`.
 - [ ] Tag `v0.2.0` once an install on a Mac and on this machine both pass `agent doctor`.
 

@@ -12,6 +12,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 AGENT = REPO / "bin" / "agent"
+UV_CACHE = os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv")   # uv's own cache, which a test's HOME would otherwise move
 
 sys.path.insert(0, str(REPO))
 
@@ -62,7 +63,7 @@ def checkout_home(directory: Path, **extra: str) -> dict:
   """An environment for firing a hook under test: every hook sources $HOME/.agents, so HOME is made in `directory` with `.agents` linked to this checkout."""
   (directory / "home").mkdir(exist_ok=True)
   if not (directory / "home" / ".agents").exists(): (directory / "home" / ".agents").symlink_to(REPO)
-  return {**os.environ, "HOME": str(directory / "home"), "TMPDIR": str(directory), "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv"), **extra}
+  return {**os.environ, "HOME": str(directory / "home"), "TMPDIR": str(directory), "UV_CACHE_DIR": UV_CACHE, **extra}
 
 
 @pytest.fixture
@@ -93,8 +94,11 @@ def installed(wheel, tmp_path_factory) -> Path:
 
 @pytest.fixture
 def machine(installed, tmp_path) -> dict:
-  """The environment of a machine with agentkit installed and nothing else: an empty HOME, uv's tools under tmp_path with their bin first on PATH, then the install; uv keeps this machine's cache and Python."""
-  return {key: value for key, value in os.environ.items() if key not in ("AGENTS_PROFILE", "AGENTS_HOOK_LOG", "PYTHONPATH", "CLAUDE_CONFIG_DIR")} | {"HOME": str(tmp_path / "home"), "TMPDIR": str(tmp_path), "UV_TOOL_DIR": str(tmp_path / "tools"), "UV_TOOL_BIN_DIR": str(tmp_path / "bin"), "UV_CACHE_DIR": os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv"), "UV_PYTHON": sys.executable, "PATH": os.pathsep.join([str(tmp_path / "bin"), str(installed), os.environ["PATH"]])}
+  """The environment of a machine with agentkit installed and nothing else: an empty HOME, uv's tools under tmp_path with their bin first on PATH, then the install; uv keeps this machine's cache and Python.
+
+  gh gets an empty config and no token, so nothing a test runs can reach this machine's GitHub account.
+  """
+  return {key: value for key, value in os.environ.items() if key not in ("AGENTS_PROFILE", "AGENTS_HOOK_LOG", "PYTHONPATH", "CLAUDE_CONFIG_DIR", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_HOST", "XDG_CONFIG_HOME")} | {"HOME": str(tmp_path / "home"), "TMPDIR": str(tmp_path), "GH_CONFIG_DIR": str(tmp_path / "gh"), "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@t.io", "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@t.io", "UV_TOOL_DIR": str(tmp_path / "tools"), "UV_TOOL_BIN_DIR": str(tmp_path / "bin"), "UV_CACHE_DIR": UV_CACHE, "UV_PYTHON": sys.executable, "PATH": os.pathsep.join([str(tmp_path / "bin"), str(installed), os.environ["PATH"]])}
 
 
 @pytest.fixture
@@ -102,8 +106,8 @@ def fresh(installed, machine, tmp_path):
   """`agent` as installed on that machine, run from outside any checkout."""
   (tmp_path / "elsewhere").mkdir()
 
-  def run(args: list[str], expect: int | None = 0, stdin: str | None = None) -> subprocess.CompletedProcess:
-    result = subprocess.run([str(installed / "agent"), *args], cwd=tmp_path / "elsewhere", capture_output=True, check=False, text=True, input=stdin, env=machine)
+  def run(args: list[str], expect: int | None = 0) -> subprocess.CompletedProcess:
+    result = subprocess.run([str(installed / "agent"), *args], cwd=tmp_path / "elsewhere", capture_output=True, check=False, stdin=subprocess.DEVNULL, text=True, env=machine)   # no terminal, so nothing asks
     if expect is not None: assert result.returncode == expect, f"{args}\nout: {result.stdout}\nerr: {result.stderr}"
     return result
   return run

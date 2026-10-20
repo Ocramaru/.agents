@@ -116,8 +116,8 @@ def stale() -> list[Path]:
           if not ((copy := HOME / source.relative_to(SHIPPED)).is_file() and copy.read_bytes() == source.read_bytes())]
 
 
-def preflight() -> list[str]:
-  """Problems that must stop the install before it writes anything. Empty means go ahead."""
+def preflight(profile: str | None = None) -> list[str]:
+  """Problems that must stop the install before it writes anything, `profile` being the answer to clone or use. Empty means go ahead."""
   problems = []
   if hasattr(os, "geteuid") and os.geteuid() == 0:
     problems.append("run this as yourself, not root: everything it writes lives in your home")
@@ -133,10 +133,16 @@ def preflight() -> list[str]:
   if INSTALLED and (here / "agentkit").is_dir():
     problems.append(f"{here} is a clone of .agents, and an install keeps its state there. Run the clone's own "
                     "bin/agent install, or move it aside and bring back its profile/ and local.toml")
+
+  # a clone over ssh with no key or an unknown host stops halfway, or waits on a prompt, so ask first and never interactively
+  if profile and _profile.remote(profile) and _profile.git(_profile.DEFAULT, "remote", "get-url", "origin").stdout.strip() != profile:
+    try: reached = subprocess.run(["git", "ls-remote", profile, "HEAD"], capture_output=True, check=False, text=True, timeout=60, env=os.environ | {"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")})
+    except subprocess.TimeoutExpired: reached = subprocess.CompletedProcess([], 1, "", "no answer in 60 seconds")
+    if reached.returncode: problems.append(f"cannot reach {profile}: {(reached.stderr.strip().splitlines() or ['git said nothing'])[-1]}. `git ls-remote {profile}` should work first; nothing was changed")
   return problems
 
 
-def keep() -> tuple[int, str]:
+def keep(profile: str | None = None) -> tuple[int, str]:
   """Under uvx, install agentkit as a uv tool from where this copy came, so `agent` outlives the run: (0, the tool's `agent`), (0, "") outside uvx, or (1, why not).
 
   The checks come first, so a machine the install would refuse is left without a tool too.
@@ -145,7 +151,7 @@ def keep() -> tuple[int, str]:
   try: cache = subprocess.run(["uv", "cache", "dir"], capture_output=True, check=False, text=True).stdout.strip()
   except FileNotFoundError: return 0, ""   # no uv, so no uvx either
   if not (cache and Path(sys.prefix).resolve().is_relative_to(Path(cache).resolve())): return 0, ""   # uvx runs from an environment in uv's cache
-  if problems := preflight(): return 1, "\n".join(f"cannot install: {problem}" for problem in problems)
+  if problems := preflight(profile): return 1, "\n".join(f"cannot install: {problem}" for problem in problems)
 
   found = _profile.source()
   vcs = found.get("vcs_info", {})
@@ -160,7 +166,7 @@ def run(targets: list[str], create: bool = False, profile: str | None = None) ->
 
   `profile`, a URL to clone or a directory, is saved to `local.toml` so later commands find it unasked.
   """
-  problems = preflight()
+  problems = preflight(profile)
   if problems: return 1, [f"cannot install: {problem}" for problem in problems]
 
   lines = []
