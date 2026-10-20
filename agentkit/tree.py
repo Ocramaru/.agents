@@ -15,7 +15,7 @@ from agentkit.frontmatter import load
 
 LINKS = "agents.toml"
 INJECTABLE = ("context", "learned", "todo")             # the archive is never injected
-FULL, CONTEXT, NONE = INJECT_MODES = ("full", "context", "none")   # what agents.toml `inject` may say: every injectable note, the context note alone, or none
+INJECT_MODES = ("full", "context", "none")   # what agents.toml `inject` may say: every injectable note, the context note alone, or none
 # Directories nothing reads; one list, so finding notes and choosing files to review cannot disagree.
 SKIP = frozenset({
   ".git", ".hg", ".svn",                                                     # version control
@@ -88,8 +88,8 @@ def payload(path: Path, skip: set[Path] | None = None) -> tuple[str, list[str], 
   nearest = next((owner(agents_dir) for agents_dir in reversed(links) if notes.note_files(agents_dir)), None)   # a config-only `.agents` is never nearest
   for agents_dir in reversed(links):
     mode = toml(agents_dir).get("inject") or toml(owner(agents_dir)).get("inject") or (settings["nearest"] if owner(agents_dir) == nearest else settings["ancestors"])
-    if mode == NONE: continue
-    names = INJECTABLE if mode == FULL else (CONTEXT,)
+    if mode == "none": continue
+    names = INJECTABLE if mode == "full" else ("context",)
     allowed.append((agents_dir, names))
 
     for name in INJECTABLE:
