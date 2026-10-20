@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from agentkit import backends, config, doctor, gh, git, guard, hooks, hub, install, issue, profile, reviews, status, version
+from agentkit import backends, config, doctor, gh, git, guard, hooks, hub, install, issue, profile, reviews, status
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli.out import done, escape, fail, line, note, report, table
 
@@ -164,7 +164,7 @@ def cmd_guard(args) -> int:
 def cmd_update(args) -> int:
   """Pull the latest hub, through uv for an install and git for a clone, and the latest profile, saying what each moved.
   A pull that would have to merge stops and says so instead."""
-  bad, was = 0, version()
+  bad, was = 0, hub.version()
   if hub.INSTALLED:   # uv replaces the package, and the new one copies its own hooks into ~/.agents
     try: upgraded = subprocess.run(["uv", "tool", "upgrade", "agentkit"], capture_output=True, check=False, text=True)
     except FileNotFoundError: upgraded = subprocess.CompletedProcess(["uv"], 127, "", "uv is not on PATH")
@@ -190,7 +190,7 @@ def cmd_update(args) -> int:
       count = int(git.run(where, "rev-list", "--count", f"{before}..HEAD" if before else "HEAD").stdout.strip() or 0)
       line(f"ok     {name}: {f'pulled {count} commit' + ('s' if count != 1 else '') if count else 'already current'}  ({where})")
 
-  if not hub.INSTALLED and (now := version()) != was: line(f"       agentkit {was} -> {now}")
+  if not hub.INSTALLED and (now := hub.version()) != was: line(f"       agentkit {was} -> {now}")
   return 1 if bad else 0
 
 

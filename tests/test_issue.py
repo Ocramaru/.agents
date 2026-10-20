@@ -9,7 +9,7 @@ import argparse, json, platform, socket, subprocess, urllib.parse, webbrowser
 import pytest
 from conftest import git
 
-from agentkit import cli, doctor, gh as agentkit_gh, issue, version
+from agentkit import cli, doctor, gh as agentkit_gh, hub, issue
 
 HUB = "Ocramaru/.agents"
 OPEN_FOUR = [{"number": 4, "title": "Close takes file line but open prints file", "url": "https://github.com/Ocramaru/.agents/issues/4"}]
@@ -67,7 +67,7 @@ def test_the_link_carries_the_title_and_body_url_encoded_and_is_printed_as_well_
   said = issue.draft(title, body, elsewhere, "someone/fork")   # a fork files on itself
   link = urllib.parse.urlsplit(browser[0])
   assert len(browser) == 1 and (link.scheme, link.netloc, link.path) == ("https", "github.com", "/someone/fork/issues/new")
-  assert sent(said) == {"title": title, "body": f"{body}\n\n---\nagentkit {version()} · {platform.system()}", "address": browser[0]}
+  assert sent(said) == {"title": title, "body": f"{body}\n\n---\nagentkit {hub.version()} · {platform.system()}", "address": browser[0]}
   assert " " not in browser[0] and "\n" not in browser[0] and browser[0].count("&") == 1   # a & inside a value is %26, so only the one between the two fields remains
   assert f"# {title}" in said and body in said and said.startswith("Draft issue for someone/fork") and said.splitlines()[-1] == f"Opened in your browser: {browser[0]}"
 
@@ -82,7 +82,7 @@ def test_a_machine_with_no_browser_still_gets_the_link(gh, monkeypatch, elsewher
 def test_the_draft_names_the_commit_and_nothing_private_unless_asked(gh, browser, elsewhere):
   """The report names the .agents commit, and the repo and hostname only with --context, in the text and in the link."""
   plain, asked = issue.draft("t", "", elsewhere, HUB), issue.draft("t", "", elsewhere, HUB, context=True)
-  assert sent(plain)["body"].startswith(f"agentkit {version()}") and "unknown" not in plain   # the version and HEAD resolve in .agents
+  assert sent(plain)["body"].startswith(f"agentkit {hub.version()}") and "unknown" not in plain   # the version and HEAD resolve in .agents
   assert "project" not in plain and socket.gethostname() not in plain
   assert "met in project" in asked and socket.gethostname() in asked
   assert "met in project" in sent(asked)["body"] and socket.gethostname() in sent(asked)["body"]
@@ -129,7 +129,7 @@ def test_a_body_too_long_for_a_link_is_cut_in_the_link_at_a_line_and_printed_who
   """Past issue.LINK_LIMIT characters the link keeps the lines that fit, whole lines only, and says so; the printed draft has every line."""
   body = "\n".join(f"line {number}" + "x" * (number % 7) for number in range(count))
   said = issue.draft("a long one", body, elsewhere, HUB)
-  full = f"{body}\n\n---\nagentkit {version()} · {platform.system()}"
+  full = f"{body}\n\n---\nagentkit {hub.version()} · {platform.system()}"
   carried = sent(said)["body"]
   assert carried != full and full.startswith(carried + "\n")   # a prefix that ends where a line does
   assert len(browser[0]) <= issue.LINK_LIMIT < len(browser[0]) + len(urllib.parse.quote("\n" + full[len(carried) + 1:].split("\n")[0]))   # as many lines as fit: the next one would not

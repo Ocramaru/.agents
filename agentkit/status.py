@@ -8,12 +8,12 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from agentkit import agents, backends, git, hooks, hub, inject, install, notes, profile as _profile, reviews, tree, version
+from agentkit import agents, backends, git, hooks, hub, inject, install, notes, profile as _profile, reviews, tree
 
 
 def release() -> list[tuple[str, str]]:
   """The version, and whether this is a clone to work on or an install to upgrade."""
-  return [("agentkit", f"{version()}, an install at {hub.BUNDLED}, its state in {hub.HOME}" if hub.INSTALLED else f"{version()}, a clone at {hub.BUNDLED}")]
+  return [("agentkit", f"{hub.version()}, an install at {hub.BUNDLED}, its state in {hub.HOME}" if hub.INSTALLED else f"{hub.version()}, a clone at {hub.BUNDLED}")]
 
 
 def profile() -> list[tuple[str, str]]:

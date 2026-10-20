@@ -8,7 +8,7 @@ import contextlib, io, json, uuid
 import pytest
 from conftest import agent, git, note
 
-from agentkit import agents, cli, review, version
+from agentkit import agents, cli, hub, review
 
 
 @pytest.fixture
@@ -73,7 +73,7 @@ def test_notes_commands_resolve_from_where_you_stand_and_say_what_they_found(pro
 
 def test_version_names_the_release_and_the_commit(project):
   """`agent --version` is the pyproject version and this checkout's commit, the version `agent issue` and `agent status` carry too."""
-  assert agent(["--version"], cwd=project).stdout.strip() == f"agentkit {version()}" and "(" in version()
+  assert agent(["--version"], cwd=project).stdout.strip() == f"agentkit {hub.version()}" and "(" in hub.version()
 
 
 def test_bad_input_is_a_message_not_a_traceback_and_a_local_agentkit_never_shadows_the_real_one(project, tmp_path_factory):

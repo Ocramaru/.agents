@@ -14,7 +14,7 @@ import urllib.parse
 import webbrowser
 from pathlib import Path
 
-from agentkit import gh, git, version
+from agentkit import gh, git, hub
 from agentkit.hub import BUNDLED, INSTALLED
 
 LINK_LIMIT = 8000   # characters a browser will take in a link
@@ -54,7 +54,7 @@ def filed(repository: str) -> list[str]:
 def draft(title: str, body: str, working_directory: Path, repository: str, dry: bool = False,
           context: bool = False) -> str:
   """Open a prefilled new-issue page, or the open issue that already says it, and return what to show the person. Nothing is filed."""
-  foot = f"agentkit {version()} · {platform.system()}"
+  foot = f"agentkit {hub.version()} · {platform.system()}"
 
   if context:   # issues on .agents are public, and a hostname or a private repo's name is not theirs
     root = git.root(working_directory)

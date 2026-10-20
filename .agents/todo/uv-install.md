@@ -31,7 +31,7 @@ The package is only `agentkit/`. Everything it reads sits beside it in the repo,
 | `standards/`, `agents/`, `templates/`, `config.toml` | `standards.GLOBAL`, `agents.AGENTS`, `hub.CONFIG`, `hub.TEMPLATES` | bundled, read-only |
 | `hooks/`, `githooks/`, `commands/`, `settings.hooks.json`, `bin/agent` | `install`, and `settings.hooks.json` names `$HOME/.agents/hooks/*.sh` | bundled, must sit at a fixed path |
 | `local.toml`, `profile/`, `sessions/`, `.hooks.log` | `profile.path`, `hooks`, the gate | this machine's state, writable |
-| `.git` | `agent update`, `version()`, `issue.slug`, `doctor` | the clone itself |
+| `.git` | `agent update`, `hub.version()`, `issue.slug`, `doctor` | the clone itself |
 
 So the change is not packaging alone: `HUB` splits into where the bundled files are and where this machine's state is.
 
@@ -42,7 +42,7 @@ So the change is not packaging alone: `HUB` splits into where the bundled files 
 - **Hooks are copied, not linked.** `agent install` writes `hooks/*.sh` into `~/.agents/hooks/` and rewrites them on upgrade. A symlink into the tool venv dangles when the venv's Python changes. `settings.hooks.json` keeps its paths.
 - **Hooks call `agent` on PATH** rather than `$HOME/.agents/bin/agent`, which is the 30 ms `uv run` they pay today; a console script starts faster.
 - **`agent update`** runs `uv tool upgrade agentkit` for an install and pulls the latest for a clone, and the profile pull stays. It says `pulled N commits` or `already current`, since `-q` makes both silent now.
-- **`version()`** reads `importlib.metadata`, with the commit from the install's `direct_url.json`; a clone keeps reading `pyproject.toml` and `git rev-parse`.
+- **`hub.version()`** reads `importlib.metadata`, with the commit from the install's `direct_url.json`; a clone keeps reading `pyproject.toml` and `git rev-parse`.
 
 ## Profile
 
@@ -73,7 +73,7 @@ Semver, starting at the first install. Bump `version` in `pyproject.toml` and ta
 - [x] `package = true`, the entry point, the wheel's data, and a build of the wheel in a test.
 - [x] A test that installs the wheel into a throwaway venv and runs `agent --version`, `agent doctor` and `agent standards x.py` from outside any checkout, with `HOME` pointed at a temp directory.
 - [x] `agent install` copies hooks and writes `settings.hooks.json` for an install; `doctor` checks it.
-- [x] `agent update` and `version()` for both modes.
+- [x] `agent update` and `hub.version()` for both modes.
 - [x] `install.sh` becomes `uv tool install ...` then `agent install`; README says so, with the clone as the dev path.
 - [x] `agent install` offers to make a profile, creates the private remote through `gh`, and takes `--profile new|URL|DIR|none`; a test runs it with no terminal and with a temp `HOME`.
 - [x] Preflight the profile URL's reachability before the install writes anything.
