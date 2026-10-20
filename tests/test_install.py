@@ -16,7 +16,7 @@ from agentkit import hooks, install
 def home(tmp_path, monkeypatch):
   (tmp_path / "home" / ".claude").mkdir(parents=True)
   monkeypatch.setenv("HOME", str(tmp_path / "home"))
-  monkeypatch.setenv("AGENTS_HOOK_LOG", str(tmp_path / "home" / ".agents" / ".hooks.log"))   # where this HOME's hooks log
+  monkeypatch.setenv("AGENTS_HOOK_LOG", str(tmp_path / "home" / ".agents" / ".hooks.log"))
   monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
   monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
   return tmp_path / "home"
@@ -48,6 +48,8 @@ def typed(command: list[str], answers: str, environment: dict, cwd: Path) -> tup
   os.close(main)
   if process.poll() is None: os.killpg(process.pid, signal.SIGKILL)   # its own session, so whatever it started goes too
   return process.wait(), shown.decode(errors="replace")
+
+CHANGES = {"copy", "link", "saved", "wrote", "point"}   # the first word of an install line that changed something
 
 
 def commit(repo: Path, blocked: bool = False) -> list[str]:
@@ -85,8 +87,9 @@ def test_install_wires_claude_once_and_leaves_the_rest_alone(home):
   assert (home / ".claude" / "CLAUDE.md").read_text().count("AGENTS.md") == 1
 
   code, lines = install.run([])
-  changes = [line for line in lines if line.startswith(" ") and line.strip().partition(" ")[0] not in ("ok", "note")]
+  changes = [line for line in lines if line.strip().partition(" ")[0] in CHANGES]
   assert code == 0 and changes == [], changes
+  assert f"  ok    .agents -> {install.HOME}" in lines   # a second run says the link it found
 
   for text in ("{not json", "[1, 2]"):
     settings.write_text(text)
@@ -141,7 +144,7 @@ def test_an_install_copies_what_agents_name_by_path_into_home_and_its_hooks_reac
   fired = subprocess.run(["bash", str(home / ".agents" / "hooks" / "inject.sh")], input=json.dumps(payload), capture_output=True, check=True, text=True, env=machine)
   assert json.loads(fired.stdout)["systemMessage"].startswith(".agents loaded")
 
-  assert not {line.split()[0] for line in fresh(["install"]).stdout.splitlines() if line.strip()} & {"copy", "link", "saved", "wrote", "point"}
+  assert not {line.split()[0] for line in fresh(["install"]).stdout.splitlines() if line.strip()} & CHANGES
   assert "ok    hooks, githooks, commands and AGENTS.md in" in fresh(["doctor"], expect=None).stdout
   (home / ".agents" / "hooks" / "inject.sh").write_text("stale\n")
   assert "FAIL  hooks, githooks, commands and AGENTS.md in" in fresh(["doctor"], expect=1).stdout
@@ -197,7 +200,7 @@ def test_install_sh_installs_the_tool_then_wires_the_machine_and_reruns_cleanly(
   (Path(machine["HOME"]) / ".claude").mkdir(parents=True)
   run = lambda: subprocess.run(["bash", str(REPO / "install.sh")], capture_output=True, check=True, cwd=tmp_path, env=machine | {"AGENTS_SOURCE": str(wheel)}, start_new_session=True, stdin=subprocess.DEVNULL, text=True).stdout   # no terminal to hand over
   assert "wrote hooks block in settings.json" in run() and (tmp_path / "bin" / "agent").is_file()
-  assert not {line.split()[0] for line in run().splitlines() if line.strip()} & {"copy", "link", "saved", "wrote", "point"}
+  assert not {line.split()[0] for line in run().splitlines() if line.strip()} & CHANGES
 
 
 def test_install_asks_for_a_profile_once_and_only_at_a_terminal_with_gh_logged_in(fresh, installed, machine, tmp_path):
@@ -308,6 +311,17 @@ def test_a_review_with_no_backend_says_how_without_a_terminal_and_offers_the_que
 
   code, shown = typed([str(installed / "agent"), "sub", "run", "doc-check", "x.py"], "y\necho\n", machine, here)
   assert code != -signal.SIGKILL and "echo     Echo" in shown and "found at" in shown and default() == "echo"
+
+
+def test_an_install_with_no_git_says_so_rather_than_crash_reaching_a_profile(monkeypatch):
+  """With git missing, preflight names it and does not run git to check a profile URL, which would raise instead."""
+  def no_git(argv, **options):
+    if argv[0] == "git": raise FileNotFoundError("git")
+    return subprocess.CompletedProcess(argv, 0, "", "")
+  monkeypatch.setattr(install.shutil, "which", lambda tool: None if tool == "git" else f"/usr/bin/{tool}")
+  monkeypatch.setattr(install.subprocess, "run", no_git)
+  monkeypatch.setattr(install._profile.subprocess, "run", no_git)
+  assert any(problem.startswith("missing git") for problem in install.preflight("git@github.com:someone/.agents.profile.git"))
 
 
 def test_the_global_hook_turns_on_and_off_but_never_replaces_someone_elses(home):

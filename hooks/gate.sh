@@ -11,10 +11,11 @@
 # Author: Marco Cassar (@Ocramaru)
 
 _gate_stamp() {  # sets GATE_STAMP, a filename from the path without hashing it
-  local flat="${2//\//_}"
+  local flat="${2//_/_u}"   # _ becomes _u and / becomes _s, so two paths never share a stamp
+  flat="${flat//\//_s}"
   # inside the session's stamp directory, where inject and forget.sh put theirs: TMPDIR, as they
   # use it, so compaction clears these too. A Mac sets TMPDIR, and a fixed /tmp would outlive it.
-  GATE_STAMP="${TMPDIR:-/tmp}/agents-${3:-nosession}/gate/$1.${flat#_}"
+  GATE_STAMP="${TMPDIR:-/tmp}/agents-${3:-nosession}/gate/$1.${flat#_s}"
 }
 
 gate_skip() {

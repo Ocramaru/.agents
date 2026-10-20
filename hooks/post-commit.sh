@@ -15,10 +15,11 @@ root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 log="$root/.agents/.reviews/post-commit.log"
 mkdir -p "$(dirname "$log")"
 
-args=(sub review "$agent" --commit HEAD)
+commit=$(git rev-parse HEAD)   # read here: the review starts later, when another commit may have moved HEAD
+args=(sub review "$agent" --commit "$commit")
 [[ -n "$backend" ]] && args+=(--backend "$backend")
 
-printf '\n=== %s %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$(git rev-parse --short HEAD)" >>"$log"
+printf '\n=== %s %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "${commit:0:7}" >>"$log"
 
 # Detach, so closing the terminal does not kill a review halfway. macOS has no setsid; nohup keeps
 # it alive through the hangup, which is the part that matters here.

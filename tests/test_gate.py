@@ -3,7 +3,7 @@
 Author: Marco Cassar (@Ocramaru)
 """
 
-import json, subprocess, uuid
+import json, os, subprocess, uuid
 from pathlib import Path
 
 import pytest
@@ -86,3 +86,9 @@ def test_gate_ledger_walks_up_an_absolute_path_and_stops_on_a_relative_one(tmp_p
   """The nearest .agents above an absolute path names the ledger; a relative path ends the walk instead of stripping it forever."""
   (tmp_path / "repo" / ".agents").mkdir(parents=True)
   assert subprocess.run(["bash", "-c", f'. "{HOOKS}/gate.sh"; for path in "$@"; do gate_ledger "$path"; printf "%s\\n" "$GATE_LEDGER"; done', "gate", str(tmp_path / "repo" / "src" / "mod.py"), "mod.py", "src/mod.py"], capture_output=True, text=True, timeout=10, check=True, cwd=tmp_path).stdout.splitlines() == [str(tmp_path / "repo" / ".agents" / ".reviews" / "reviews.duckdb"), "", ""]
+
+
+def test_two_paths_differing_only_by_a_slash_and_an_underscore_keep_separate_gates(tmp_path):
+  """An answer gated for /r/a/b says nothing about /r/a_b, so each path gets a stamp of its own, and the same path stays gated."""
+  script = f'. "{HOOKS / "gate.sh"}"; gate_mark inject /r/a/b session; gate_skip inject /r/a_b session && echo shared || echo separate; gate_skip inject /r/a/b session && echo gated'
+  assert subprocess.run(["bash", "-c", script], capture_output=True, check=True, text=True, env={**os.environ, "TMPDIR": str(tmp_path)}).stdout.split() == ["separate", "gated"]

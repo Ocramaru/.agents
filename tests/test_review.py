@@ -224,3 +224,8 @@ def test_an_http_backend_is_looked_for_on_the_port_its_url_means(monkeypatch):
   said = [Backend("x", {"kind": "http", "url": url}).here() for url in ("https://models.example/v1", "http://models.example/v1", "http://localhost:11434/v1")]
   assert tried == [("models.example", 443), ("models.example", 80), ("localhost", 11434)]
   assert said[2] == (False, "not running at localhost:11434: start its server")
+
+
+def test_releasing_a_role_the_backend_has_no_model_for_asks_nothing_and_says_false():
+  """Release runs as a review's cleanup, so a role with no model there returns False rather than raising after the work is done."""
+  assert Backend("x", {"kind": "http", "url": "http://localhost:9/v1", "release_url": "http://localhost:9/api/generate", "models": {"text": "m"}}).release("code-large") is False

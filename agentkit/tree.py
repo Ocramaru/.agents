@@ -1,6 +1,6 @@
 """The chain of `.agents` directories above a file, and which of their notes are injected.
 The chain is found by walking up to the repo root and never stored, so a committed `.agents` works wherever it is cloned.
-Only `context.md` (or a split one's index and the parts that apply) is injected; `learned.md` and `todo.md` are named, to read when needed.
+By default only `context.md` (or a split one's index and the parts that apply) is injected and `learned.md` and `todo.md` are named, to read when needed; `inject` in agents.toml changes that.
 
 Author: Marco Cassar (@Ocramaru)
 """
@@ -54,6 +54,16 @@ def git_root(directory: Path) -> Path | None:
     result = subprocess.run(["git", "-C", str(directory), "rev-parse", "--show-toplevel"], capture_output=True, check=False, text=True)
     _ROOTS[directory] = Path(result.stdout.strip()) if result.returncode == 0 else None
   return _ROOTS[directory]
+
+
+def main_checkout(directory: Path) -> Path | None:
+  """The main checkout of the linked worktree holding `directory`, or None anywhere else.
+  A bare repo's worktrees and a submodule's have no main checkout: the common dir is not a `.git`, or one with no work tree."""
+  result = subprocess.run(["git", "-C", str(directory), "rev-parse", "--git-dir", "--git-common-dir"], capture_output=True, check=False, text=True)
+  if result.returncode: return None
+  git_dir, common = ((Path(directory) / line).resolve() for line in result.stdout.splitlines())   # relative to `directory` when git does not print them absolute
+  if git_dir == common or common.name != ".git": return None
+  return common.parent if git_root(common.parent) == common.parent else None
 
 
 def find_note_dirs(root: Path) -> list[Path]:
@@ -120,7 +130,7 @@ def payload(path: Path, skip: set[Path] | None = None) -> tuple[str, list[str], 
     if len(text) <= room:
       chosen[note] = text
       spent += len(text)
-    elif room >= 1500:
+    elif room >= 1500:   # enough left for a cut note to be worth sending; under it the note is only named
       cut = text[:room].rsplit("\n", 1)[0]
       chosen[note] = f"{cut}\n\n[truncated at the budget, {len(text) - len(cut)} more characters in the file]"
       spent = settings["budget"]
@@ -214,7 +224,7 @@ def init(target: Path) -> dict:
   for template in sorted((_profile.TEMPLATES / "agents").iterdir()):
     file, text = agents_dir / template.name, template.read_text(encoding="utf-8").replace("{name}", target.name)
     if not file.exists(): file.write_text(text, encoding="utf-8")
-    elif template.name == ".gitignore" and (lacking := [line for line in text.splitlines() if line not in (have := file.read_text(encoding="utf-8").splitlines())]):
+    elif template.name == ".gitignore" and (have := file.read_text(encoding="utf-8").splitlines()) is not None and (lacking := [line for line in text.splitlines() if line not in have]):   # read once, not once per line
       file.write_text("\n".join(have + lacking) + "\n", encoding="utf-8")   # an existing file stays as written; an ignore list gains the lines it lacks
     else: continue
     added.append(template.name)

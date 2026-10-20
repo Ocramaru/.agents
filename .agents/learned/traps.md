@@ -6,9 +6,9 @@ kind: learned
 
 # Traps
 
-- **A hook that exits 0 when its CLI fails hides a command that no longer exists.** doc-check.sh called `agent run` after `run` moved under `agent sub`, and `|| exit 0` with nothing logged made every opted-in session end look like a clean check. A hook that cannot run its CLI logs an ERROR with the last line the CLI printed.
+- **A ledger belongs to one checkout, and only its dismissals travel.** Findings closed `--as wrong` in a worktree were unknown to `~/.agents`, whose next review of the same lines raised them again; the uv-install worktree alone held 54. A linked worktree writes `wrong` and `wontfix` closures to the main checkout's ledger as well, under the same id, and a review reads both. Open findings and `fixed` stay where they were made. A dismissal that never reached the main ledger, made before this or lost when the second write failed, is copied with `agent sub import <ledger> --root <main checkout>`.
 
-- **A ledger belongs to one checkout, so its closures do not travel.** It sits at the checkout's root and a review reads dismissals only from there: findings closed `--as wrong` in a worktree are unknown to `~/.agents`, whose next review of the same lines raises them again. Close them again there, with the same reasons, once the work lands.
+- **A hook that exits 0 when its CLI fails hides a command that no longer exists.** doc-check.sh called `agent run` after `run` moved under `agent sub`, and `|| exit 0` with nothing logged made every opted-in session end look like a clean check. A hook that cannot run its CLI logs an ERROR with the last line the CLI printed.
 
 - **A pseudo-terminal test must answer every question the run asks.** Answers typed ahead cover only the questions a test expected; when install gained the backend question, three profile tests each sat out the 30 s read timeout and the suite took 109 s. Give such a test the flag for every question it is not about.
 

@@ -63,9 +63,8 @@ class Backend:
     url = self.spec.get("release_url")
     if not url: return False
 
-    request = urllib.request.Request(url, data=json.dumps({"model": self.model_for(role), "keep_alive": 0}).encode(), headers={"Content-Type": "application/json"})
-    try:
-      with urllib.request.urlopen(request, timeout=30): return True
+    try:   # a role this backend has no model for has nothing loaded to release either
+      with urllib.request.urlopen(urllib.request.Request(url, data=json.dumps({"model": self.model_for(role), "keep_alive": 0}).encode(), headers={"Content-Type": "application/json"}), timeout=30): return True
     except Exception:  # noqa: BLE001 -- a model left loaded is not a failed review
       return False
 

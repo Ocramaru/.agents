@@ -115,7 +115,7 @@ def record(session: Session, agent: str, backend: str, root: Path, file: str, me
 def _insert(connection, record: dict) -> None:
   if record.get("closure"):   # a closure rides the same queue as a review, so one writer does both
     closure = record["closure"]
-    connection.execute("insert into closures values (?,?,?,?,?,?,?,?,?,?)",
+    connection.execute("""insert into closures (id, finding_id, task, file, line, issue, author, "at", verdict, reason) values (?,?,?,?,?,?,?,?,?,?)""",
                        [closure["id"], closure["finding_id"], closure["task"], closure["file"], str(closure["line"]), closure["issue"],
                         closure["author"], closure["at"], closure["verdict"], closure["reason"]])
     return
@@ -130,7 +130,7 @@ def _insert(connection, record: dict) -> None:
        json.dumps(record["handles"]), json.dumps(record["messages"]), record.get("run"), record.get("digest")])
 
     if record["findings"]:
-      connection.executemany("insert into findings values (?,?,?,?,?,?,?,?,?,?,?)",
+      connection.executemany("""insert into findings (id, review_id, task, author, file, line, issue, failure, fix, "at", closed_by) values (?,?,?,?,?,?,?,?,?,?,?)""",
                              [[str(uuid7()), record["id"], record["task"], record["author"], finding.get("file", record["file"]),
                                str(finding.get("line", "")), finding.get("issue", ""), finding.get("failure", ""), finding.get("fix", ""),
                                record["at"], None] for finding in record["findings"]])
@@ -156,8 +156,8 @@ def writer(root: Path):
       for record in pending:
         try: _insert(connection, record)
         except Exception as error: failures.append(error)  # noqa: BLE001 -- one record failing must not lose the rest of the queue
-    except Exception as error:  # noqa: BLE001 -- collected, raised once the queue drains
-      failures.append(error)   # collect rather than raise: dying here loses the rest of the queue
+    except Exception as error:  # noqa: BLE001 -- collected, raised once the queue drains, so the rest of the queue is not lost
+      failures.append(error)
     finally:
       if connection is not None: connection.close()
       pending.clear()
@@ -364,19 +364,39 @@ def close(root: Path, file: str, line: int, verdict: str, reason: str = "") -> l
           finding["file"] == file and (not line or first_line(finding["line"]) == line))]
 
   who, now = author(), time.time()
-  with writer(root) as put:
-    for finding in hits:
-      put({"closure": {"id": str(uuid7()), "finding_id": finding["id"], "task": finding["task"], "file": finding["file"],
-                       "line": finding["line"], "issue": finding["issue"], "author": who, "at": now,
-                       "verdict": verdict, "reason": reason}})
+  closures = [{"id": str(uuid7()), "finding_id": finding["id"], "task": finding["task"], "file": finding["file"], "line": finding["line"], "issue": finding["issue"], "author": who, "at": now, "verdict": verdict, "reason": reason} for finding in hits]
+  # a dismissal judges code that lands unchanged, so a worktree's main checkout keeps it too, under the same id; a fix lands with its code
+  for ledger in ([root, main] if verdict in KEEP_QUIET and closures and (main := tree.main_checkout(root)) else [root]):
+    with writer(ledger) as put:
+      for closure in closures: put({"closure": closure})
   return hits
 
 
 def dismissals(root: Path) -> dict[str, list[dict]]:
-  """What was closed as wrong or not worth fixing, by file, for the reviewer to read next time."""
+  """What was closed as wrong or not worth fixing, by file, for the reviewer to read next time.
+  A linked worktree reads its main checkout's as well, where every worktree's dismissals also land."""
+  found: dict[str, dict] = {}
+  for ledger in filter(None, (root, tree.main_checkout(root))):
+    with _reading(ledger) as connection:
+      if connection is None or not _has(connection, "closures"): continue
+      # by id, since a dismissal made in a worktree is in both ledgers
+      found |= {row["id"]: row for row in _select(connection, f"""select id, file, line, issue, verdict, reason, author from closures where verdict in ({", ".join("?" * len(KEEP_QUIET))})""", list(KEEP_QUIET))}
+
   out: dict[str, list[dict]] = {}
-  with _reading(root) as connection:
-    if connection is None or not _has(connection, "closures"): return {}
-    for row in _select(connection, f"""select file, line, issue, verdict, reason, author from closures
-                           where verdict in ({", ".join("?" * len(KEEP_QUIET))}) order by id""", list(KEEP_QUIET)): out.setdefault(row["file"], []).append(row)
+  for _, row in sorted(found.items()): out.setdefault(row["file"], []).append(row)
   return out
+
+
+def adopt(source: Path, root: Path) -> tuple[list[dict], int]:
+  """Copy the dismissals in another ledger file into this checkout's, skipping any already here; returns those added and how many were here.
+  A closure carries the file, line and issue a reviewer is told, so no finding or review comes with it: a review would supersede this checkout's own."""
+  with _reading(root) as connection:   # before duckdb is imported below, so a missing one gets connect's message
+    known = {row["id"] for row in _select(connection, "select id from closures")} if connection is not None and _has(connection, "closures") else set()
+
+  import duckdb
+  with duckdb.connect(str(source), read_only=True) as connection:
+    theirs = _select(connection, f"""select id, finding_id, task, file, line, issue, author, "at", verdict, reason from closures where verdict in ({", ".join("?" * len(KEEP_QUIET))}) order by id""", list(KEEP_QUIET)) if _has(connection, "closures") else []
+
+  with writer(root) as put:
+    for closure in (added := [closure for closure in theirs if closure["id"] not in known]): put({"closure": closure})
+  return added, len(theirs) - len(added)

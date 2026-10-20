@@ -57,7 +57,7 @@ def checks() -> list[tuple[bool, str, str]]:
   here = Path.cwd()
   note_dirs = tree.find_note_dirs(here)   # walked once, since over a large tree it is the slow part
 
-  # every check from here reads config, so a hand-edited file that does not parse is reported and the rest wait for it
+  # a hand-edited config that does not parse is reported, and every check below waits until it does
   broken, root = [], tree.git_root(here)
   for file in dict.fromkeys(path for path in [profile.CONFIG, profile.file("config.toml"), profile.LOCAL, *(directory / tree.LINKS for directory in [*note_dirs, *((root / ".agents", root / ".agents" / ".local") if root else ())])] if path and path.is_file()):
     try: tomllib.loads(file.read_text(encoding="utf-8"))

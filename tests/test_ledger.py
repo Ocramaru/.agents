@@ -9,7 +9,7 @@ from contextlib import nullcontext
 import pytest
 from conftest import Stub, findings, git, note, put, record, run_review
 
-from agentkit import agents, cli, command, doctor, hooks, inject, review, reviews
+from agentkit import agents, cli, command, doctor, hooks, inject, review, reviews, tree
 from agentkit.cli import out, show
 
 
@@ -100,6 +100,53 @@ def test_a_finding_closes_by_line_range_or_id_and_only_wrong_is_passed_back(ledg
 
   reviews.write(record(ledger, "t-id", "abcdef", [{"line": 1, "issue": "named like an id"}]), ledger)
   assert issues("abcdef") == ["named like an id"]   # a file named like a finding id is closed by its name
+
+
+def test_a_dismissal_made_in_a_worktree_reaches_the_main_checkout_and_nothing_else_does(ledger, tmp_path_factory, monkeypatch, capsys):
+  """Wrong and wontfix land in both ledgers and each review reads them once, open findings and fixed stay put, and an import adds only what is missing."""
+  duckdb = pytest.importorskip("duckdb")
+  main, elsewhere = ledger, tmp_path_factory.mktemp("elsewhere")
+  run = lambda *args, cwd=main: subprocess.run(["git", "-c", "user.name=T", "-c", "user.email=t@t.io", *args], cwd=cwd, check=True, capture_output=True)
+  put(main, "a.py", "mod.py")
+  run("add", "-A")
+  run("commit", "-qm", "init")
+  run("worktree", "add", "-q", ".claude/worktrees/feature")   # where the hub's own worktrees live, inside the main checkout
+  run("clone", "-q", "--bare", ".", "bare.git")   # a bare repo inside a checkout is not that checkout's
+  run("worktree", "add", "-q", str(elsewhere / "bare-worktree"), cwd=main / "bare.git")
+  run("clone", "-q", "--bare", ".", str(elsewhere / "hidden" / ".git"))   # a bare repo kept in .git has no work tree
+  run("worktree", "add", "-q", str(elsewhere / "hidden-worktree"), cwd=elsewhere / "hidden" / ".git")
+  linked = main / ".claude" / "worktrees" / "feature"
+  assert tree.main_checkout(linked) == main.resolve() and tree.main_checkout(main) is None
+  assert tree.main_checkout(elsewhere / "bare-worktree") is None and tree.main_checkout(elsewhere / "hidden-worktree") is None
+
+  with duckdb.connect(str(reviews.path(main))) as connection: connection.execute(reviews.SCHEMA + "alter table closures add column note text;")   # a main ledger on a newer schema
+  reviews.write(record(linked, "t-a", "a.py", [{"line": 1, "issue": "backwards"}, {"line": 2, "issue": "stale comment"}, {"line": 3, "issue": "typo"}]), linked)
+  reviews.close(linked, "a.py", 1, "wrong", "lower is better here")
+  reviews.close(linked, "a.py", 3, "fixed")
+  assert [finding["issue"] for finding in reviews.open_findings(linked)] == ["stale comment"]
+  assert reviews.open_findings(main) == [] and [row["verdict"] for row in reviews.query(main, "select verdict from closures")] == ["wrong"]
+  backend = Stub()
+  run_review("file-review", backend, [main / "a.py"], main, tier="code")
+  assert "backwards (closed as wrong: lower is better here)" in backend.shown[-1] and "stale comment" not in backend.shown[-1]
+
+  reviews.write(record(main, "t-m", "mod.py", [{"line": 4, "issue": "unused"}]), main)
+  reviews.close(main, "mod.py", 0, "wontfix", "kept on purpose")
+  assert {file: [row["issue"] for row in rows] for file, rows in reviews.dismissals(linked).items()} == {"a.py": ["backwards"], "mod.py": ["unused"]}   # main's too, and its own once
+
+  with monkeypatch.context() as patch:   # closed as it was before dismissals travelled
+    patch.setattr(tree, "main_checkout", lambda directory: None)
+    reviews.close(linked, "a.py", 2, "wontfix", "the comment is current")
+  source = str(reviews.path(linked, create=False))
+  assert cli.main(["sub", "import", source, "--root", str(main)]) == 0
+  printed = capsys.readouterr().out
+  assert "added a.py:2 as wontfix  stale comment" in printed and "1 dismissal added" in printed and "1 already there" in printed
+  assert cli.main(["sub", "import", source, "--root", str(main)]) == 0 and "0 dismissals added" in capsys.readouterr().out
+  assert {file: [row["issue"] for row in rows] for file, rows in reviews.dismissals(main).items()} == {"a.py": ["backwards", "stale comment"], "mod.py": ["unused"]}
+  assert sorted(row["verdict"] for row in reviews.query(main, "select verdict from closures")) == ["wontfix", "wontfix", "wrong"]   # never the fix
+
+  with duckdb.connect(str(elsewhere / "old.duckdb")) as connection: connection.execute("create table reviews (id text)")   # a ledger from before closures
+  assert cli.main(["sub", "import", str(elsewhere / "old.duckdb"), "--root", str(main)]) == 0 and "0 dismissals added" in capsys.readouterr().out
+  assert cli.main(["sub", "import", str(elsewhere / "nope.duckdb")]) == 2
 
 
 def test_what_the_person_is_told_arrives_whole(ledger, capsys, monkeypatch):

@@ -188,14 +188,14 @@ def cmd_review(args) -> int:
     standards = Library()
     return fail(f"nothing under {root} is governed by {', '.join(names)} ({"; ".join(f"{name} reads {', '.join(review.globs_of(agents.definition(name, found), standards)) or 'what its standards govern'}" for name in names)})", 2)
 
+  if not args.recheck:   # before --limit trims the plans, so a file it leaves out is not called one no standard covers
+    _unreviewed(sorted((set(files) | set(discovered)) - {path for _, selected in plans for path in selected}), root)
+
   if limit:
     for index, (name, selected) in enumerate(plans):
       if len(selected) > limit:
         note(f"{name}: {len(selected)} files matched, reviewing the first {limit}")
         plans[index] = (name, selected[:limit])
-
-  if not args.recheck:
-    _unreviewed(sorted((set(files) | set(discovered)) - {path for _, selected in plans for path in selected}), root)
 
   if args.dry:
     for name, selected in plans:
@@ -307,6 +307,18 @@ def cmd_close(args) -> int:
       line(f"closed {reviews.short_id(finding['id'])} {finding['file']}:{reviews.first_line(finding['line'])} as {args.verdict}"
             f"  {' '.join(finding['issue'].split())[:70]}")
   return fail(f"nothing open at {', '.join(missed)}; `agent sub reviews --open` lists what is") if missed else 0
+
+
+@command("import", help="copy what another ledger closed as wrong or wontfix into this one, such as a worktree's", group="sub")
+@arg("ledger", help="the other ledger file, as `<checkout>/.agents/.reviews/reviews.duckdb`")
+@arg("--root", help="the repo to copy into (default: here)")
+def cmd_import(args) -> int:
+  if not Path(args.ledger).is_file(): return fail(f"no such ledger: {args.ledger}", 2)
+  root = _repo(args.root)
+  added, already = reviews.adopt(Path(args.ledger), root)
+  for closure in added:
+    line(f"added {closure['file']}:{reviews.first_line(closure['line'])} as {closure['verdict']}  {' '.join(closure['issue'].split())[:70]}")
+  return done(f"{len(added)} dismissal{'' if len(added) == 1 else 's'} added to {reviews.path(root, create=False)}" + (f", {already} already there" if already else ""))
 
 
 @command("agents", help="the kinds of review there are, and what each reads", group="sub", default=True)

@@ -111,3 +111,27 @@ def test_the_log_is_rotated_by_one_hook_at_a_time(environment):
   log(environment, "inject", "s-4", "sent   after it was killed")
   lines = Path(environment["AGENTS_HOOK_LOG"]).read_text().splitlines()
   assert len(lines) == 501 and lines[-1].endswith("after it was killed") and not lock.exists()
+
+
+def test_post_commit_reviews_the_commit_it_fired_for_even_once_head_moves(environment, tmp_path):
+  """The review is handed the commit's own id, read when the hook fires, never `HEAD`, which a second commit can move before the detached review starts."""
+  repo = git(tmp_path / "repo")
+  subprocess.run(["git", "-C", str(repo), "-c", "user.name=T", "-c", "user.email=t@t.io", "commit", "-q", "--allow-empty", "-m", "one"], check=True, env=environment)
+  commit = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, check=True, text=True).stdout.strip()
+  subprocess.run(["bash", str(REPO / "hooks" / "post-commit.sh")], cwd=repo, check=True, env=environment)
+  calls = Path(environment["FAKE_CALLS"])
+
+  for _ in range(100):   # the review is detached, so its call lands a moment later
+    if calls.is_file() and calls.read_text(): break
+    time.sleep(0.05)
+  assert calls.read_text().split() == ["sub", "review", "auto", "--commit", commit]
+
+
+def test_forget_clears_a_session_by_its_plain_id_and_refuses_one_that_is_a_path(environment, tmp_path):
+  """forget.sh puts the session id into a path it removes, so an id that is not a plain name is refused and nothing outside the stamps goes."""
+  (tmp_path / "agents-abc" / "gate").mkdir(parents=True)
+  (tmp_path / "keep").mkdir()
+  _, row = fire(environment, "forget.sh", {"session_id": "abc/../keep"})
+  assert row[3] == "ERROR" and (tmp_path / "keep").is_dir()
+  _, row = fire(environment, "forget.sh", {"session_id": "abc"})
+  assert row[3:] == ["cleared", "1 stamps, so the next edit re-injects"] and not (tmp_path / "agents-abc").exists()

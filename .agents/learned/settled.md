@@ -6,6 +6,10 @@ kind: learned
 
 # Settled
 
+- **A dismissal travels as its closure row alone.** A closure carries the file, line, issue and reason a reviewer is shown, and `dismissals` joins it to nothing. Copying the finding's review as well would make it the newest verdict for its task in the main checkout, superseding that checkout's own open findings, and a finding without its review joins to nothing and shows nowhere. One id in both ledgers is what lets a review read a dismissal once and `agent sub import` skip what is already there.
+
+- **`git rev-parse --git-dir --git-common-dir` differ only in a linked worktree.** Its common dir is the main checkout's `.git`, except for a bare repo's worktree (common dir `x.git`, or a bare repo kept in `.git`, which has no work tree) and a submodule's (`.git/modules/x`), which have no main checkout. From a subdirectory of a main checkout git prints the common dir relative, `../.git`, so it is resolved against the directory asked about.
+
 - **The console script starts in 77 to 81 ms, the clone's `bin/agent` in 83 to 97.** Median of ten on this machine, Python 3.15, `--version` and `inject` on a file nothing governs. Skipping `uv run` saves 6 to 16 ms, so an `agent hook <name>` would cost about 77 ms on every edit where the shell gate answers a repeat in 12: the hooks stay shell.
 
 - **An install is dated by its RECORD.** uv links a package's files from its cache, so their mtimes are the cache's; RECORD is written by each install. `hooks.errors` counts an install's hook errors from then, and `uv tool upgrade` rebuilds a directory source once its version changes, which is what lets a test upgrade for real.

@@ -39,7 +39,7 @@ The hub: standards, notes and review, linked into every agent from `~/.agents`.
 | `library_for` | the only answer to which standards govern a file; inject and review both use it |
 | `inject.py` | standards, notes and open findings for a file, once per session |
 | `review.py` | routes each file to the agents whose standards govern it |
-| `reviews.py` | the ledger, `<repo>/.agents/.reviews/`, gitignored |
+| `reviews.py` | the ledger, `<repo>/.agents/.reviews/`, gitignored, one per checkout; a linked worktree writes its `wrong` and `wontfix` closures to the main checkout's as well and reads dismissals from both, while open findings and `fixed` stay where they were made |
 | `config.toml` `[backends]` | where agents run; a role maps to a model. No `default` ships: the profile names one, and `backends.get` never falls back to the first |
 | `githooks/` | `core.hooksPath`: the repo's own hook first, a review only where a note opts the repo in |
 | `hooks/gate.sh` | any hook: skip a call whose answer is known, stamped per session, invalidated by one named file |

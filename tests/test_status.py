@@ -105,6 +105,7 @@ def test_a_broken_part_is_described_and_the_rest_still_show(tmp_path, monkeypatc
   shown = described(agent(["status"], cwd=repo, env={"CLAUDE_CONFIG_DIR": str(tmp_path / "claude")}).stdout)
   assert shown["claude hooks"][0].startswith(f"unknown: {tmp_path / 'claude' / 'settings.json'} is not valid JSON")
   assert shown["standards"][0].startswith("cannot be read, TOMLDecodeError: ") and shown["agentkit"] and shown["hook errors"]
+  assert shown["findings"][0].startswith("cannot be read, ")   # an empty file where the ledger goes
 
   monkeypatch.setitem(sys.modules, "duckdb", None)   # what importing it does where it is not installed
   monkeypatch.chdir(repo)

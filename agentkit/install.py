@@ -135,7 +135,7 @@ def preflight(profile: str | None = None) -> list[str]:
                     "bin/agent install, or move it aside and bring back its profile/ and local.toml")
 
   # a clone over ssh with no key or an unknown host stops halfway, or waits on a prompt, so ask first and never interactively
-  if profile and _profile.remote(profile) and _profile.git(_profile.DEFAULT, "remote", "get-url", "origin").stdout.strip() != profile:
+  if profile and "git" not in missing and _profile.remote(profile) and _profile.git(_profile.DEFAULT, "remote", "get-url", "origin").stdout.strip() != profile:   # with no git, the line above says so
     try: reached = subprocess.run(["git", "ls-remote", profile, "HEAD"], capture_output=True, check=False, text=True, timeout=60, env=os.environ | {"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")})
     except subprocess.TimeoutExpired: reached = subprocess.CompletedProcess([], 1, "", "no answer in 60 seconds")
     if reached.returncode: problems.append(f"cannot reach {profile}: {(reached.stderr.strip().splitlines() or ['git said nothing'])[-1]}. `git ls-remote {profile}` should work first; nothing was changed")
@@ -153,7 +153,7 @@ def keep(profile: str | None = None) -> tuple[int, str]:
   if not (cache and Path(sys.prefix).resolve().is_relative_to(Path(cache).resolve())): return 0, ""   # uvx runs from an environment in uv's cache
   if problems := preflight(profile): return 1, "\n".join(f"cannot install: {problem}" for problem in problems)
 
-  found = _profile.source()
+  found = _profile.source()   # the next line names it again for uv: git+URL@revision for git, the URL for a file or directory, the name for an index
   vcs = found.get("vcs_info", {})
   kept = subprocess.run(["uv", "tool", "install", f"agentkit @ {'git+' if vcs else ''}{found['url']}{'@' + vcs['requested_revision'] if vcs.get('requested_revision') else ''}" if found else "agentkit"], capture_output=True, check=False, text=True)
   if kept.returncode: return 1, f"could not keep agentkit as a uv tool: {(kept.stderr.strip().splitlines() or ['uv said nothing'])[-1]}"
@@ -186,6 +186,7 @@ def run(targets: list[str], create: bool = False, profile: str | None = None) ->
   elif not here.exists():   # every hook and settings.json name ~/.agents, wherever the clone lives
     here.symlink_to(HOME)
     lines += ["hub", f"  link  .agents -> {HOME}"]
+  else: lines += ["hub", f"  ok    .agents -> {HOME}"]
 
   for script in [*HOME.glob("hooks/*.sh"), CLI, *GITHOOKS.glob("*")]:
     if script.is_file(): script.chmod(script.stat().st_mode | 0o111)

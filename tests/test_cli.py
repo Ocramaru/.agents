@@ -169,3 +169,10 @@ def test_the_commit_hook_installs_beside_any_hook_and_quotes_its_arguments(proje
 
   agent(["hook", "install", "--agent", "a b; echo hi"], cwd=project)
   assert "'a b; echo hi'" in hook.read_text()
+
+
+def test_a_file_left_out_by_limit_is_not_called_one_no_standard_covers(project):
+  """--limit trims what is reviewed, and what it trims is not reported among the files no reviewer reads."""
+  (project / "src" / "pkg" / "other.py").write_text("y = 2\n")
+  said = agent(["sub", "review", "file-review", "src/pkg/mod.py", "src/pkg/other.py", "--limit", "1", "--dry-run"], cwd=project).stderr
+  assert "reviewing the first 1" in said and "no standard covers" not in said
