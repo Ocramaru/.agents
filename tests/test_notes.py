@@ -11,7 +11,7 @@ from conftest import git, note, put
 
 from agentkit import agents as ag, hub, inject, mapblock, notes, review, tree
 from agentkit.frontmatter import parse
-from agentkit.standards import Library
+from agentkit.standards import Library, scoped
 
 
 @pytest.mark.parametrize("files, target, expected", [
@@ -43,6 +43,18 @@ def test_a_section_naming_a_file_governs_that_file_alone(tmp_path):
   document = parse("---\nname: x\nno closing fence\n")     # a hand edit that loses the closing fence loses no text
   assert document.meta == {}
   assert "no closing fence" in document.body
+
+
+def test_a_file_heading_inside_a_fenced_example_is_text_not_a_section(tmp_path):
+  """A `## x.py` line in a code block scopes no section and drops nothing from the standard, while the same heading outside one still does."""
+  (tmp_path / "s.md").write_text("---\nname: s\napplies: *.md\n---\n\n## Layout\n\nLAYOUT-RULE\n\n```md\n## x.py\n\nEXAMPLE-TEXT\n```\n\nAFTER-RULE\n\n## y.py\n\nY-RULE\n")
+  layer = Library(tmp_path).layers["s"][0]
+
+  assert scoped(layer.doc.body, "x.py") == []
+  for name in ("other.md", None):
+    kept = layer.for_name(name)
+    assert "## x.py" in kept and "EXAMPLE-TEXT" in kept and "AFTER-RULE" in kept and "Y-RULE" not in kept   # only the real section is dropped
+  assert "Y-RULE" in layer.for_name("y.py") and [heading for heading, _ in scoped(layer.doc.body, "y.py")] == ["y.py"]
 
 
 def test_a_repos_agents_toml_reaches_inject_and_review_alike(tmp_path, monkeypatch):

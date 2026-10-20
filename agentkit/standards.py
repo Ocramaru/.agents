@@ -9,15 +9,15 @@ import fnmatch
 import functools
 from pathlib import Path
 
-from agentkit import hub, profile as _profile
+from agentkit import hub, mapblock, profile as _profile
 from agentkit.frontmatter import Doc, load
 
 AUTO = object()   # the profile goes with the bundled set, and with nothing else
 
 
 def sections(lines: list[str]) -> list[tuple[str, int, int]]:
-  """(heading, first line, line after the last) of each `##` section."""
-  headings = [(index, line[3:].strip().strip("`")) for index, line in enumerate(lines) if line.startswith("## ")]
+  """(heading, first line, line after the last) of each `##` section; a `##` line inside a fenced block is text."""
+  headings = [(number - 1, heading.strip("`")) for heading, number in mapblock.headings(lines) if lines[number - 1].startswith("## ")]
   return [(heading, index, end) for (index, heading), end in zip(headings, [start for start, _ in headings[1:]] + [len(lines)])]
 
 
