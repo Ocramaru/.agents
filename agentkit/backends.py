@@ -85,9 +85,9 @@ class Backend:
     raise ValueError(f"backend {self.name} has no model for role {role!r}; it has {', '.join(models) or 'none'}. "
                      f"Add one to [backends.{self.name}] models in config.toml, or pick another with --backend")
 
-  def run(self, prompt: str, tier: str = "text", session: str | None = None, effort: str | None = None) -> Reply:
-    """Send a prompt to the model for `tier`."""
-    model = self.model_for(tier)
+  def run(self, prompt: str, role: str = "text", session: str | None = None, effort: str | None = None) -> Reply:
+    """Send a prompt to the model for `role`."""
+    model = self.model_for(role)
 
     if self.kind == "cli": return self._cli(prompt, model, session, self.timeout, effort)
     if self.kind == "http": return self._http(prompt, model, self.timeout)

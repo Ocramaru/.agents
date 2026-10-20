@@ -48,7 +48,7 @@ class Session:
     return message
 
   def send(self, agent: str, backend: Backend, body: str, instructions: str = "",
-           tier: str = "text", kind: str = "note", effort: str | None = None) -> Message:
+           role: str = "text", kind: str = "note", effort: str | None = None) -> Message:
     """One turn. `instructions` go only on the opening turn, or the prompt drifts."""
     # checked before posting, or the last message counts against the cap and is never sent
     if len(self.messages) + 1 >= self.max_turns:
@@ -65,7 +65,7 @@ class Session:
     parts.append(PROTOCOL)
 
     try:
-      reply = backend.run("\n\n".join(parts), tier=tier, session=handle, effort=effort)
+      reply = backend.run("\n\n".join(parts), role=role, session=handle, effort=effort)
     except Exception as error:  # noqa: BLE001
       # no reply, no turn: recording one spends the cap on network noise and replays it to the model
       self.messages.pop()
@@ -74,9 +74,9 @@ class Session:
     if reply.session: self.handles[agent] = reply.session
     return self.post(_parse(reply.text, agent))
 
-  def answer(self, agent: str, backend: Backend, body: str, tier: str, effort: str | None = None) -> Message:
-    """Continue a conversation. `tier` has no default: a reply on another model is another reviewer."""
-    return self.send(agent, backend, body, tier=tier, kind="answer", effort=effort)
+  def answer(self, agent: str, backend: Backend, body: str, role: str, effort: str | None = None) -> Message:
+    """Continue a conversation. `role` has no default: a reply on another model is another reviewer."""
+    return self.send(agent, backend, body, role=role, kind="answer", effort=effort)
 
 
 PROTOCOL = f"""Reply with one JSON object and nothing else:

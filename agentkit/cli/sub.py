@@ -29,12 +29,12 @@ def _repo(given: str | None) -> Path:
   return Path(given).resolve() if given else Path.cwd()
 
 
-def _turn(args, conversation: Session, agent: str, backend, root: Path, file: str, message, tier: str, run: str) -> int:
+def _turn(args, conversation: Session, agent: str, backend, root: Path, file: str, message, role: str, run: str) -> int:
   """A conversation's new turn: kept in the ledger, the one store, then shown as a review result is."""
   findings = review.findings(message.data)
   if file:   # one file per conversation, so the file is known here and the model's name for it is not
     for finding in findings: finding["file"] = file
-  reviews.write(reviews.record(conversation, agent, backend.name, root, file, message, findings, tier, run), root)
+  reviews.write(reviews.record(conversation, agent, backend.name, root, file, message, findings, role, run), root)
 
   outcome = {"file": file or "(several files)", "agent": agent, "task": conversation.task, "state": message.state,
              "kind": message.kind, "body": message.body, "findings": findings}
@@ -60,7 +60,7 @@ def _missing_model(args, backend, roles) -> int:
 @arg("--changed", action="store_true", help="include the working diff")
 @arg("--backend", help="where to run it, as `agent sub backends` lists them (default: the configured one)")
 @arg("--task", help="continue this conversation instead of starting one")
-@arg("--tier", help="the model role, overriding the agent's own")
+@arg("--tier", dest="role", help="the model role, overriding the agent's own")
 @arg("--json", action="store_true", help="the result as JSON, for an agent to read")
 def cmd_run(args) -> int:
   definition = agents.definition(args.agent, agents.definitions())
@@ -73,18 +73,18 @@ def cmd_run(args) -> int:
   conversation = reviews.conversation(reviews.latest(task, root)) or Session(task)
 
   if (code := settle(args.backend)): return code
-  backend, tier = backends.get(args.backend), args.tier or definition.get("model")
-  if (code := _missing_model(args, backend, [tier])): return code
+  backend, role = backends.get(args.backend), args.role or definition.get("model")
+  if (code := _missing_model(args, backend, [role])): return code
   # one file is about that file, so it is reviewed and rechecked as one; several, or a diff, are not
   return _turn(args, conversation, args.agent, backend, root, review.label(Path(args.paths[0]).resolve(), root) if len(args.paths) == 1 and not args.changed else "",
-               conversation.send(args.agent, backend, body, instructions=agents.instructions(definition), tier=tier, effort=definition.get("effort") or None), tier, review.new_run())
+               conversation.send(args.agent, backend, body, instructions=agents.instructions(definition), role=role, effort=definition.get("effort") or None), role, review.new_run())
 
 
 @command("reply", help="answer a question, or tell a review you fixed what it found", group="sub")
 @arg("task", help="the conversation's task id, as a run or `agent sub reviews` prints it")
 @arg("text", help="what to say")
 @arg("--backend", help="where to run it (default: where the conversation ran)")
-@arg("--tier", help="the model role, overriding the one the conversation ran on")
+@arg("--tier", dest="role", help="the model role, overriding the one the conversation ran on")
 @arg("--json", action="store_true", help="the result as JSON, for an agent to read")
 @arg("--root", help="the repo the conversation belongs to (default: here)")
 def cmd_reply(args) -> int:
@@ -98,10 +98,10 @@ def cmd_reply(args) -> int:
 
   backend, definition = backends.get(args.backend or record.get("backend")), agents.definition(agent, agents.definitions())
   # continue on the model the conversation started on; the default role belongs to a fresh run
-  tier = args.tier or record.get("tier") or definition.get("model")
-  if (code := _missing_model(args, backend, [tier])): return code
+  role = args.role or record.get("tier") or definition.get("model")   # the stored column is still named tier, and an old reviews table keeps it
+  if (code := _missing_model(args, backend, [role])): return code
   return _turn(args, conversation, agent, backend, root, record.get("file") or "",
-               conversation.answer(agent, backend, review.recheck(args.text, Path(record["root"]), record["file"]) if record.get("file") else args.text, tier=tier, effort=definition.get("effort") or None), tier, review.new_run())
+               conversation.answer(agent, backend, review.recheck(args.text, Path(record["root"]), record["file"]) if record.get("file") else args.text, role=role, effort=definition.get("effort") or None), role, review.new_run())
 
 
 @command("review", help="fan an agent out over a repo, one conversation per file",
@@ -123,7 +123,7 @@ def cmd_reply(args) -> int:
 @arg("--fresh", action="store_true", help="ask about every file again, even one whose verdict still stands")
 @arg("--recheck", action="store_true", help="only files with findings open or closed as fixed since, by their reviewer")
 @arg("--backend", help="where to run it (default: the configured one)")
-@arg("--tier", help="the model role, overriding each agent's own")
+@arg("--tier", dest="role", help="the model role, overriding each agent's own")
 def cmd_review(args) -> int:
   # `review eval.py` means the agent was left out: an agent or kind name is never an existing path
   found = agents.definitions()
@@ -206,7 +206,7 @@ def cmd_review(args) -> int:
   if exclude and roots: note(f"excluding {', '.join(exclude)}")  # only discovery honours them
   if (code := settle(args.backend or settings.get("backend"))): return code
   backend = backends.get(args.backend or settings.get("backend"))   # a repo may keep its reviews local
-  if (code := _missing_model(args, backend, {args.tier or agents.definition(name, found).get("model") for name, _ in plans})): return code
+  if (code := _missing_model(args, backend, {args.role or agents.definition(name, found).get("model") for name, _ in plans})): return code
 
   # what actually runs at once: plans go one after another, and the backend caps each of them
   at_once = min(jobs, backend.parallel, max(len(selected) for _, selected in plans))
@@ -215,7 +215,7 @@ def cmd_review(args) -> int:
        + (f", {at_once} at a time" if at_once > 1 else ""))
 
   began = time.monotonic()
-  return _report_review(root, _fan_out(plans, backend, root, jobs, args.tier, found, kind, libraries, keep=args.keep, run=run, mode="jsonl" if args.jsonl else "text", effort=args.effort, fresh=args.fresh),
+  return _report_review(root, _fan_out(plans, backend, root, jobs, args.role, found, kind, libraries, keep=args.keep, run=run, mode="jsonl" if args.jsonl else "text", effort=args.effort, fresh=args.fresh),
                         run, time.monotonic() - began)
 
 
@@ -347,7 +347,7 @@ def cmd_backends(args) -> int:
                 for name, backend in sorted(known.items())], wide=("models",))
 
 
-def _fan_out(plans, backend, root: Path, jobs: int, want_tier: str | None, found: dict, kind: dict[str, str], libraries: dict, keep: bool = False,
+def _fan_out(plans, backend, root: Path, jobs: int, want_role: str | None, found: dict, kind: dict[str, str], libraries: dict, keep: bool = False,
              run: str | None = None, mode: str = "text", effort: str | None = None, fresh: bool = False) -> list:
   """Run each plan in turn, the backend capping how many of its files run at once.
 
@@ -367,19 +367,19 @@ def _fan_out(plans, backend, root: Path, jobs: int, want_tier: str | None, found
   try:
     for name, selected in plans:
       definition = agents.definition(name, found)
-      tier = want_tier or definition.get("model")
-      used.append(tier)
+      role = want_role or definition.get("model")
+      used.append(role)
 
       # print what is about to be slow before it starts, so a long silence does not look like a hang
-      note(f"  {kind.get(name, name)} review ({name}) on {backend.name}/{backend.model_for(tier)}, "
+      note(f"  {kind.get(name, name)} review ({name}) on {backend.name}/{backend.model_for(role)}, "
            f"started {time.strftime('%H:%M:%S')}, up to {backend.timeout}s a file")
-      results += review.run(name, backend, selected, root, definition, libraries, tier=tier, jobs=jobs, on_start=started,
+      results += review.run(name, backend, selected, root, definition, libraries, role=role, jobs=jobs, on_start=started,
                             on_done=tick, run=run, effort=effort, fresh=fresh)
     return results
   finally:
     if not keep:   # the box is shared with whatever else is running on it
-      freed = [tier for tier in dict.fromkeys(used) if backend.release(tier)]
-      if freed: note(f"released {', '.join(backend.model_for(tier) for tier in freed)}")
+      freed = [role for role in dict.fromkeys(used) if backend.release(role)]
+      if freed: note(f"released {', '.join(backend.model_for(role) for role in freed)}")
 
 
 def _report_review(root: Path, results: list, run: str, seconds: float) -> int:

@@ -57,8 +57,8 @@ def test_an_http_backend_waits_out_a_dropped_call_but_not_a_refusal(monkeypatch)
     assert len(calls) == tries, code
 
 
-def test_a_reply_is_read_wherever_its_object_sits_and_a_turn_keeps_its_tier_and_its_cap():
-  """Unparseable is failed, findings come out of either shape, the tier is never guessed and a dead backend costs no turn."""
+def test_a_reply_is_read_wherever_its_object_sits_and_a_turn_keeps_its_role_and_its_cap():
+  """Unparseable is failed, findings come out of either shape, the role is never guessed and a dead backend costs no turn."""
   for prose in ["I had a look and it seems fine", '{"kind": "findings", "state": "compl']: assert session._parse(prose, "doc-check").state == "failed"
 
   for reply, found in [
@@ -74,10 +74,10 @@ def test_a_reply_is_read_wherever_its_object_sits_and_a_turn_keeps_its_tier_and_
   for data, kept in [({"findings": [real]}, [real]), (None, []), ({"findings": "prose"}, []), (["not a finding", real, {"line": 149, "issue": "  ", "fix": ""}], [real])]: assert review.findings(data) == kept, data
 
   backend, conversation = Stub(), Session("t")
-  conversation.send("doc-check", backend, "look", tier="code-large")
-  conversation.answer("doc-check", backend, "fixed it", tier="code-large")
-  assert [tier for tier, _ in backend.asked] == ["code-large", "code-large"]
-  with pytest.raises(TypeError): conversation.answer("doc-check", backend, "and again")   # no default, so the tier cannot go missing
+  conversation.send("doc-check", backend, "look", role="code-large")
+  conversation.answer("doc-check", backend, "fixed it", role="code-large")
+  assert [role for role, _ in backend.asked] == ["code-large", "code-large"]
+  with pytest.raises(TypeError): conversation.answer("doc-check", backend, "and again")   # no default, so the role cannot go missing
 
   conversation = Session("t")
   conversation.post(Message("caller", "note", "working", "review this"))
@@ -99,7 +99,7 @@ def test_a_conversation_continues_from_the_ledger_and_only_a_verdict_replaces_it
   backend = Stub(findings({"line": 1, "issue": "no author line", "fix": "add it"}), {"kind": "answer", "state": "completed", "body": "I would test add(2, 3) first."}, {"kind": "note", "state": "failed", "body": "timed out"})
   monkeypatch.setattr(backends, "get", lambda *args, **kwargs: backend)
   monkeypatch.chdir(ledger)
-  assert cli.main(["sub", "run", "file-review", "mod.py", "--task", "talk", "--backend", "stub"]) == 0
+  assert cli.main(["sub", "run", "file-review", "mod.py", "--task", "talk", "--backend", "stub", "--tier", "code"]) == 0
   assert (kept := reviews.latest("talk", ledger))["file"] == "mod.py" and kept["run"] and len(kept["messages"]) == 2
 
   still = lambda: [finding["issue"] for finding in reviews.open_findings(ledger)]
@@ -108,6 +108,7 @@ def test_a_conversation_continues_from_the_ledger_and_only_a_verdict_replaces_it
   source.write_text("x = 2  # AFTER\n")
   reply("talk", "what would you test first?")
   assert len(reviews.latest("talk", ledger)["messages"]) == 4   # the same conversation, continued
+  assert [role for role, _ in backend.asked] == ["code", "code"]   # the reply ran on the role the review stored, which the table still calls tier
   assert "AFTER" in backend.shown[-1] and "BEFORE" not in backend.shown[-1].split("what would you test first?", 1)[1]
   assert still() == ["no author line"]   # an answer is not a verdict
   reply("talk", "fixed, recheck")
@@ -124,7 +125,7 @@ def test_a_conversation_continues_from_the_ledger_and_only_a_verdict_replaces_it
 def test_the_models_are_handed_back_even_when_a_review_raises(tmp_path, monkeypatch):
   """The fan-out releases each model it loaded, unless the caller asked to keep it."""
   released, plan = [], [("file-review", [tmp_path / "x.py"])]
-  holds = SimpleNamespace(name="holds", parallel=1, timeout=1, model_for=lambda tier: f"m-{tier}", release=lambda tier: released.append(tier) or True)
+  holds = SimpleNamespace(name="holds", parallel=1, timeout=1, model_for=lambda role: f"m-{role}", release=lambda role: released.append(role) or True)
   monkeypatch.setattr(review, "run", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
   with pytest.raises(RuntimeError): cli.sub._fan_out(plan, holds, tmp_path, 1, None, ag.definitions(), {}, {})
   assert released == ["code-large"]
@@ -229,3 +230,12 @@ def test_an_http_backend_is_looked_for_on_the_port_its_url_means(monkeypatch):
 def test_releasing_a_role_the_backend_has_no_model_for_asks_nothing_and_says_false():
   """Release runs as a review's cleanup, so a role with no model there returns False rather than raising after the work is done."""
   assert Backend("x", {"kind": "http", "url": "http://localhost:9/v1", "release_url": "http://localhost:9/api/generate", "models": {"text": "m"}}).release("code-large") is False
+
+
+def test_the_tier_flag_names_the_model_role_and_a_role_the_backend_lacks_is_refused_before_anything_is_sent(tmp_path, monkeypatch, capsys):
+  """`--tier` is the spelling people type; the role it names is checked against the backend's models first."""
+  root = git(tmp_path / "repo")
+  put(root, "a.py")
+  monkeypatch.chdir(root)
+  assert cli.main(["sub", "review", "file-review", "a.py", "--backend", "claude", "--tier", "nosuch"]) == 2
+  assert "no model for role 'nosuch'" in capsys.readouterr().err

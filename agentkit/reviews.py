@@ -103,11 +103,11 @@ def connect(root: Path, read_only: bool = False, tries: int = 1):
 
 
 def record(session: Session, agent: str, backend: str, root: Path, file: str, message, findings: list,
-           tier: str, run: str | None = None, digest: str | None = None) -> dict:
+           role: str, run: str | None = None, digest: str | None = None) -> dict:
   """One conversation as a row, flat enough to read and complete enough to resume.
-  `tier` is stored because a reply continues on the model the review was done with."""
+  `role` is stored in the `tier` column because a reply continues on the model the review was done with."""
   return {"id": str(uuid7()), "task": session.task, "at": time.time(), "author": author(), "agent": agent,
-          "backend": backend, "tier": tier, "root": str(root), "file": file, "state": message.state,
+          "backend": backend, "role": role, "root": str(root), "file": file, "state": message.state,
           "kind": message.kind, "body": message.body, "findings": findings, "max_turns": session.max_turns,
           "handles": session.handles, "messages": [turn.__dict__.copy() for turn in session.messages], "run": run, "digest": digest}
 
@@ -125,7 +125,7 @@ def _insert(connection, record: dict) -> None:
     connection.execute(   # named columns, so adding one does not shift the values
       """insert into reviews (id, task, "at", author, agent, backend, tier, root, file, state, kind, body,
                               max_turns, handles, messages, run, digest) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-      [record["id"], record["task"], record["at"], record["author"], record["agent"], record["backend"], record["tier"],
+      [record["id"], record["task"], record["at"], record["author"], record["agent"], record["backend"], record["role"],
        record["root"], record["file"], record["state"], record["kind"], record["body"], record["max_turns"],
        json.dumps(record["handles"]), json.dumps(record["messages"]), record.get("run"), record.get("digest")])
 

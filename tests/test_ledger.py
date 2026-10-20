@@ -64,7 +64,7 @@ def test_open_findings_are_the_newest_verdict_on_a_file_that_still_has_content(l
   backend = Stub(findings({"line": 1, "issue": "x is unused", "fix": "drop it"}))
   for text, opened in (("x = 1\n", True), ("", False)):   # a file emptied since its review has no open findings
     module.write_text(text)
-    run_review("file-review", backend, [module], ledger, tier="code")
+    run_review("file-review", backend, [module], ledger, role="code")
     assert bool(reviews.open_findings(ledger)) == opened
 
 
@@ -126,7 +126,7 @@ def test_a_dismissal_made_in_a_worktree_reaches_the_main_checkout_and_nothing_el
   assert [finding["issue"] for finding in reviews.open_findings(linked)] == ["stale comment"]
   assert reviews.open_findings(main) == [] and [row["verdict"] for row in reviews.query(main, "select verdict from closures")] == ["wrong"]
   backend = Stub()
-  run_review("file-review", backend, [main / "a.py"], main, tier="code")
+  run_review("file-review", backend, [main / "a.py"], main, role="code")
   assert "backwards (closed as wrong: lower is better here)" in backend.shown[-1] and "stale comment" not in backend.shown[-1]
 
   reviews.write(record(main, "t-m", "mod.py", [{"line": 4, "issue": "unused"}]), main)
@@ -209,13 +209,13 @@ def test_doctor_names_a_bad_setting_and_judges_format_on_save_and_hook_errors(tm
 def test_a_run_reports_each_file_as_it_finishes_under_its_own_name(ledger, monkeypatch):
   """An empty file is never sent, a slow one holds back nothing, and a finding, a failure or a full ledger keeps the file's report."""
   backend = Stub()
-  results = run_review("file-review", backend, put(ledger, "__init__.py", text="") + put(ledger, "blank.py", text="\n   \n"), ledger, tier="code")
+  results = run_review("file-review", backend, put(ledger, "__init__.py", text="") + put(ledger, "blank.py", text="\n   \n"), ledger, role="code")
   assert backend.shown == []
   assert {(row["file"], row["state"], row["body"]) for row in results} == {("__init__.py", "completed", review.EMPTY), ("blank.py", "completed", review.EMPTY)}
 
   slow, quick = put(ledger, "slow.py", text="# SLOW\nx = 1\n") + put(ledger, "quick.py")
   started, landed = [], []
-  run_review("file-review", Stub(), [slow, quick], ledger, tier="code", on_start=started.append, on_done=lambda row: landed.append(row["file"]))
+  run_review("file-review", Stub(), [slow, quick], ledger, role="code", on_start=started.append, on_done=lambda row: landed.append(row["file"]))
   assert sorted(started) == ["quick.py", "slow.py"] and landed == ["quick.py", "slow.py"]
 
   result, stored = review.file("file-review", Stub(findings({"file": "/somewhere/else.py", "line": 2, "issue": "backwards"})), quick, agents.definition("file-review", agents.definitions()), "text", ledger, libraries={})
@@ -226,11 +226,11 @@ def test_a_run_reports_each_file_as_it_finishes_under_its_own_name(ledger, monke
   landed.clear()
   with monkeypatch.context() as patch:
     patch.setattr(reviews, "writer", lambda root: nullcontext(lambda row: (_ for _ in ()).throw(OSError("ledger full"))))
-    with pytest.raises(OSError, match="ledger full"): run_review("file-review", Stub(), put(ledger, "mod.py"), ledger, tier="code", on_done=lambda row: landed.append(row["state"]))
+    with pytest.raises(OSError, match="ledger full"): run_review("file-review", Stub(), put(ledger, "mod.py"), ledger, role="code", on_done=lambda row: landed.append(row["state"]))
   assert landed == ["completed"]   # reported before its record could not be queued
 
   monkeypatch.setattr(review, "file", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
-  row, = run_review("file-review", Stub(), [quick], ledger, tier="code")
+  row, = run_review("file-review", Stub(), [quick], ledger, role="code")
   assert row["file"] == "quick.py" and row["state"] == "failed" and "boom" in row["body"]
 
 
@@ -238,8 +238,8 @@ def test_a_run_is_tagged_so_it_can_be_found_filtered_and_reused(ledger):
   """A run is found by id, path or kind; only an edited file is asked again, unless the effort differs or --fresh."""
   assert {name: definition.get("effort") for name, definition in agents.definitions().items()} == {name: "medium" for name in agents.definitions()}
   backend, (net, load, readme) = Stub(), put(ledger, "src/models/net.py", "src/data/load.py", "README.md")
-  run_review("file-review", backend, [net], ledger, tier="code", run="1003-0101-aaaa")
-  run_review("file-review", backend, [load, readme], ledger, tier="code", run="1003-0102-bbbb")
+  run_review("file-review", backend, [net], ledger, role="code", run="1003-0101-aaaa")
+  run_review("file-review", backend, [load, readme], ledger, role="code", run="1003-0102-bbbb")
   assert len(backend.shown) == 3 and {effort for _, effort in backend.asked} == {"medium"}   # the definition's effort
   assert reviews.last_run(ledger) == "1003-0102-bbbb"
 
@@ -249,11 +249,11 @@ def test_a_run_is_tagged_so_it_can_be_found_filtered_and_reused(ledger):
   assert found(agent="logic") == found(agent="file-review")   # a kind or its agent
 
   load.write_text("y = 3\n")
-  by_file = {row["file"]: row for row in run_review("file-review", backend, [net, load], ledger, tier="code", run="1003-0103-cccc")}
+  by_file = {row["file"]: row for row in run_review("file-review", backend, [net, load], ledger, role="code", run="1003-0103-cccc")}
   assert len(backend.shown) == 4   # only the edited file was asked
   assert by_file["src/models/net.py"]["reused"] == "1003-0101-aaaa" and not by_file["src/data/load.py"].get("reused")
   for kwargs, asked in (({"effort": "low"}, 6), ({"effort": "low", "fresh": True}, 8)):   # the command's effort overrides, and --fresh asks again
-    run_review("file-review", backend, [net, load], ledger, tier="code", **kwargs)
+    run_review("file-review", backend, [net, load], ledger, role="code", **kwargs)
     assert len(backend.shown) == asked and backend.asked[-1][1] == "low"
 
 

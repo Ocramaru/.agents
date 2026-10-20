@@ -132,9 +132,9 @@ class Stub:
 
   def model_for(self, role): return role
 
-  def run(self, prompt, tier="text", session=None, effort=None):
+  def run(self, prompt, role="text", session=None, effort=None):
     self.shown.append(prompt)
-    self.asked.append((tier, effort))
+    self.asked.append((role, effort))
     time.sleep(0.4 if "SLOW" in prompt else 0.0)
     reply = self.replies.pop(0) if self.replies else CLEAN
     if isinstance(reply, Exception): raise reply
