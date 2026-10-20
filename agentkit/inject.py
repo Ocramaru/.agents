@@ -18,10 +18,10 @@ MENTION = "Not loaded. Read one when you have a reason to."
 def library_for(path: Path) -> Library:
   """The bundled standards, the profile's and those of each repo along the chain, layered, nearest last.
   A repo names its own files for a standard in `[applies]`, since one project's entry point is another's ordinary script."""
-  links, extra = tree.chain(path), {}
-  for agents_dir in links:
-    for name, globs in flatten_applies(tree.toml(agents_dir).get("applies") or {}).items(): extra.setdefault(name, []).extend(globs)
-  return Library(hub.STANDARDS, [agents_dir / "standards" for agents_dir in links if (agents_dir / "standards").is_dir()], extra)
+  chain, extra = tree.chain(path), {}
+  for agents_dir in chain:
+    for name, globs in flatten_applies(tree.agents_toml(agents_dir).get("applies") or {}).items(): extra.setdefault(name, []).extend(globs)
+  return Library(hub.STANDARDS, [agents_dir / "standards" for agents_dir in chain if (agents_dir / "standards").is_dir()], extra)
 
 
 def flatten_applies(table: dict, prefix: str = "") -> dict[str, list[str]]:
@@ -46,7 +46,7 @@ def payload(path: Path, session: str) -> tuple[str, list[Path | str], bool]:
   It stamps nothing; `mark` does once the text is out, so a failure in between is not recorded as delivered."""
   path, parts, keys = Path(path), [], []
   match = notes.match_name(path)
-  layers, links, found = library_for(path).for_file(match), tree.chain(path), open_findings(path)
+  layers, chain, found = library_for(path).for_file(match), tree.chain(path), open_findings(path)
 
   rules = [layer for layer in layers if not _stamp(session, layer.doc.path).exists()]
   late = [(layer, heading, text) for layer in layers if layer not in rules for heading, text in scoped(layer.doc.body, match) if not _stamp(session, f"{layer.doc.path}#{heading}").exists()]   # a section for this file, unsent though its standard went out
@@ -62,14 +62,14 @@ def payload(path: Path, session: str) -> tuple[str, list[Path | str], bool]:
       parts.append(f"Open review findings on this file. A reviewer has already read it and these are not addressed yet. Fix one, or if it is wrong or not worth fixing, record that so the next review does not raise it again:\n  agent sub close <id> --as wrong --reason '<why>'\n\n{body}")
       keys.append(key)
 
-  notes_text, mention, sent = tree.payload(path, skip={note for agents_dir in links for kind in tree.INJECTABLE for _, note in tree.note_parts(agents_dir, kind, path) if _stamp(session, note).exists()})
+  notes_text, mention, sent = tree.payload(path, skip={note for agents_dir in chain for kind in tree.INJECTABLE for _, note in tree.note_parts(agents_dir, kind, path) if _stamp(session, note).exists()})
   if notes_text:
     parts.append(f"Notes from .agents on the path to this file. Read before changing behaviour.\n\n{notes_text}")
     keys += sent
   if mention and not _stamp(session, key := f"mention:{path.parent}").exists():
     parts.append(f"{MENTION}\n  " + "\n  ".join(mention))
     keys.append(key)
-  return "\n\n".join(parts), keys, bool(layers or links or found)
+  return "\n\n".join(parts), keys, bool(layers or chain or found)
 
 
 def mark(session: str, keys: list[Path | str]) -> None:

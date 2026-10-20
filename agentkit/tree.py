@@ -13,7 +13,7 @@ from pathlib import Path
 from agentkit import config, git, hub, notes
 from agentkit.frontmatter import load
 
-LINKS = "agents.toml"
+AGENTS_TOML = "agents.toml"
 INJECTABLE = ("context", "learned", "todo")             # the archive is never injected
 INJECT_MODES = ("full", "context", "none")   # what agents.toml `inject` may say: every injectable note, the context note alone, or none
 # Directories nothing reads; one list, so finding notes and choosing files to review cannot disagree.
@@ -34,9 +34,9 @@ def ignored(name: str) -> bool:
   return name in SKIP or name.endswith(".egg-info")
 
 
-def toml(agents_dir: Path) -> dict:
+def agents_toml(agents_dir: Path) -> dict:
   """A `.agents` directory's agents.toml, or `{}`."""
-  file = Path(agents_dir) / LINKS
+  file = Path(agents_dir) / AGENTS_TOML
   return tomllib.loads(file.read_text(encoding="utf-8")) if file.is_file() else {}
 
 
@@ -69,7 +69,7 @@ def chain(path: Path) -> list[Path]:
 
   found, current = [], start
   while True:
-    if (current / ".agents").is_dir(): found += [directory for directory in (current / ".agents" / ".local", current / ".agents") if notes.note_files(directory) or (directory / LINKS).is_file()]   # the list is reversed below; config alone counts: [applies] with no notes
+    if (current / ".agents").is_dir(): found += [directory for directory in (current / ".agents" / ".local", current / ".agents") if notes.note_files(directory) or (directory / AGENTS_TOML).is_file()]   # the list is reversed below; config alone counts: [applies] with no notes
     if current == stop or current.parent == current: break
     current = current.parent
   return list(reversed(found))
@@ -81,13 +81,13 @@ def payload(path: Path, skip: set[Path] | None = None) -> tuple[str, list[str], 
   Context notes fill the budget first, nearest to outermost, before anything opted into with `inject = "full"`.
   """
   settings, skip = config.section("inject"), skip or set()
-  links = chain(path)
-  if not links: return "", [], []
+  agents_dirs = chain(path)
+  if not agents_dirs: return "", [], []
 
   allowed, mention = [], []
-  nearest = next((owner(agents_dir) for agents_dir in reversed(links) if notes.note_files(agents_dir)), None)   # a config-only `.agents` is never nearest
-  for agents_dir in reversed(links):
-    mode = toml(agents_dir).get("inject") or toml(owner(agents_dir)).get("inject") or (settings["nearest"] if owner(agents_dir) == nearest else settings["ancestors"])
+  nearest = next((owner(agents_dir) for agents_dir in reversed(agents_dirs) if notes.note_files(agents_dir)), None)   # a config-only `.agents` is never nearest
+  for agents_dir in reversed(agents_dirs):
+    mode = agents_toml(agents_dir).get("inject") or agents_toml(owner(agents_dir)).get("inject") or (settings["nearest"] if owner(agents_dir) == nearest else settings["ancestors"])
     if mode == "none": continue
     names = INJECTABLE if mode == "full" else ("context",)
     allowed.append((agents_dir, names))
@@ -118,7 +118,7 @@ def payload(path: Path, skip: set[Path] | None = None) -> tuple[str, list[str], 
       mention.append(f"{label(agents_dir)}/{shown}: over budget, {document.get('description') or 'no description'}")
 
   blocks = []
-  for agents_dir in links:  # outermost first, so the most specific notes land last
+  for agents_dir in agents_dirs:  # outermost first, so the most specific notes land last
     for name in INJECTABLE:
       for shown, note in note_parts(agents_dir, name, path):
         if note in chosen: blocks.append(f"--- {label(agents_dir)}/{shown} ---\n{chosen[note]}")
