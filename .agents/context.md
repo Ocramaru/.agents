@@ -56,7 +56,7 @@ agent doctor                              # this machine's install, which tests 
 
 Done means all three, and the finding written down: a trap into [[learned]], open work into [[todo]].
 
-Work in a git worktree, never in `~/.agents` itself: every agent on the machine runs from it, so an edit there is live for all of them mid-change. Land finished work by fast-forward.
+Work in a git worktree, never in `~/.agents` itself: every agent on the machine runs from it, so an edit there is live for all of them mid-change. Finished work moves into `~/.agents` only when nothing needs merging, so it never holds a conflict.
 
 Friction met somewhere else goes to the hub as an issue, with `agent issue "<what was awkward>"`, because another repo's notes are the wrong place for it and would never be read here.
 

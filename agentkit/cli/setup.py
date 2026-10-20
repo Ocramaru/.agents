@@ -162,10 +162,8 @@ def cmd_guard(args) -> int:
 
 @command("update", help="upgrade .agents and pull your profile")
 def cmd_update(args) -> int:
-  """Upgrade the hub, through uv for an install and by pulling a clone, then pull the profile, saying what each moved.
-
-  Pulls are fast-forward only, so one that needs a merge fails instead of merging.
-  """
+  """Pull the latest hub, through uv for an install and git for a clone, and the latest profile, saying what each moved.
+  A pull that would have to merge stops and says so instead."""
   bad, was = 0, version()
   if profile.INSTALLED:   # uv replaces the package, and the new one copies its own hooks into ~/.agents
     try: upgraded = subprocess.run(["uv", "tool", "upgrade", "agentkit"], capture_output=True, check=False, text=True)

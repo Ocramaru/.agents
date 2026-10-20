@@ -70,7 +70,7 @@ agent update
 agent profile
 ```
 
-`update` pulls `.agents` and your profile, fast-forward only, so a pull that needs a merge stops and says so. `agent profile` shows where yours is and what is in it, and `agent doctor` warns when it has work another machine would miss: an uncommitted edit, a commit not pushed, or no remote at all. `agent profile use <dir-or-url>` switches to a different one.
+`update` pulls the latest `.agents` and your profile; a pull that would have to merge stops and says so. `agent profile` shows where yours is and what is in it, and `agent doctor` warns when it has work another machine would miss: an uncommitted edit, a commit not pushed, or no remote at all. `agent profile use <dir-or-url>` switches to a different one.
 
 Tests never see your profile: the suite sets `AGENTS_PROFILE` empty, which means none. The same variable pointed at a directory overrides `local.toml` for one shell.
 

@@ -26,7 +26,7 @@ kind: learned
 
 - **The argparse fold test passes vacuously on a newer Python.** Only system 3.12.3 strands `nargs="*"` after a flag; 3.12.12, 3.13 and 3.14 do not, so the test bites only under `UV_PYTHON=/usr/bin/python3.12`.
 
-- **A conflicted merge in `~/.agents` breaks every agent's hooks until it is resolved.** A cherry-pick left conflict markers in `cli/sub.py`, and the guard failed to import in two sessions at once; it failed open, so nothing was blocked. Merge and cherry-pick in a worktree, then fast-forward.
+- **A conflicted merge in `~/.agents` breaks every agent's hooks until it is resolved.** A cherry-pick left conflict markers in `cli/sub.py`, and the guard failed to import in two sessions at once; it failed open, so nothing was blocked. Merge and cherry-pick in a worktree, and move `~/.agents` to the result only when nothing is left to merge.
 
 - **`uv run agent` in a worktree runs that worktree only because the project is a package.** With `package = false` there was no `agent` script in the venv, uv fell through to `~/.local/bin/agent`, the installed hub, and a change looked like it did nothing. `package = true` is load-bearing.
 
@@ -64,7 +64,7 @@ kind: learned
 
 - **`claude -p` waits three seconds for input on any stdin left open.** A hook or background review inherits an open pipe nobody writes to: an empty call took 7.2 s against 4.1 s with stdin closed. The backend passes `stdin=DEVNULL`.
 
-- **`~/.agents` is live for every agent on the machine, so it is not where to work on the hub.** A half-done refactor there broke `agent sub reviews --open` for another session, which filed an issue about a `NameError` that existed only in the working tree. Change the hub in a worktree (`bin/agent` runs its own checkout) and move `~/.agents` forward by fast-forward only.
+- **`~/.agents` is live for every agent on the machine, so it is not where to work on the hub.** A half-done refactor there broke `agent sub reviews --open` for another session, which filed an issue about a `NameError` that existed only in the working tree. Change the hub in a worktree (`bin/agent` runs its own checkout) and move `~/.agents` to the finished work only when nothing needs merging.
 
 - **A reviewer with no tools knows only what the prompt carries, and fills the gaps by guessing or stalling.** A recheck sent as the words "fixed, recheck" was judged against the old file; a reviewer not told it saw one file called a widely used name unused, then stalled promising to "check call sites"; one buried under 14 KB of standards for a 1.7 KB file asked six times in eleven what it was reviewing. Say it sees one file, send only the standards that govern that file, and carry the current file with every follow-up.
 

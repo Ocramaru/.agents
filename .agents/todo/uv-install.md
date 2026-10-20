@@ -41,7 +41,7 @@ So the change is not packaging alone: `HUB` splits into where the shipped files 
 - **State stays in `~/.agents`.** `local.toml`, `profile/`, `sessions/` and the hook log keep their place, so a profile and its ledger move with nothing. In a clone that directory is the clone itself, as now.
 - **Hooks are copied, not linked.** `agent install` writes `hooks/*.sh` into `~/.agents/hooks/` and rewrites them on upgrade. A symlink into the tool venv dangles when the venv's Python changes. `settings.hooks.json` keeps its paths.
 - **Hooks call `agent` on PATH** rather than `$HOME/.agents/bin/agent`, which is the 30 ms `uv run` they pay today; a console script starts faster.
-- **`agent update`** runs `uv tool upgrade agentkit` for an install and `git pull --ff-only` for a clone, and the profile pull stays. It says `pulled N commits` or `already current`, since `-q` makes both silent now.
+- **`agent update`** runs `uv tool upgrade agentkit` for an install and pulls the latest for a clone, and the profile pull stays. It says `pulled N commits` or `already current`, since `-q` makes both silent now.
 - **`version()`** reads `importlib.metadata`, with the commit from the install's `direct_url.json`; a clone keeps reading `pyproject.toml` and `git rev-parse`.
 
 ## Profile
