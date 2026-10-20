@@ -10,11 +10,12 @@ kind: todo
 
 | section | line |
 |---|---|
-| What blocks it | 24 |
-| Design | 37 |
-| Versioning | 46 |
-| Steps | 50 |
-| Open | 60 |
+| What blocks it | 25 |
+| Design | 38 |
+| Profile | 47 |
+| Versioning | 67 |
+| Steps | 71 |
+| Open | 86 |
 
 <!-- /map -->
 
@@ -43,6 +44,26 @@ So the change is not packaging alone: `HUB` splits into where the shipped files 
 - **`agent update`** runs `uv tool upgrade agentkit` for an install and `git pull --ff-only` for a clone, and the profile pull stays. It says `pulled N commits` or `already current`, since `-q` makes both silent now.
 - **`version()`** reads `importlib.metadata`, with the commit from the install's `direct_url.json`; a clone keeps reading `pyproject.toml` and `git rev-parse`.
 
+## Profile
+
+Making a profile is four manual steps today (`init`, `cd`, `git remote add`, `git push`). The install should do it, and the uv move makes that one command.
+
+First machine, then every other:
+
+```sh
+uvx --from git+https://github.com/Ocramaru/.agents agent install
+uvx --from git+https://github.com/Ocramaru/.agents agent install --profile git@github.com:<you>/.agents.profile.git
+```
+
+- **Prompt once.** With no profile set and a terminal, the install asks whether to make a private one, from `templates/profile`, with `git init`. `--profile new|URL|DIR|none` answers it for a script, and with no terminal it never prompts. Rerunning is safe.
+- **Create the remote.** With `gh` logged in, offer `gh repo create <you>/.agents.profile --private --source ~/.agents/profile --push`. It publishes, so it asks, defaults to `--private`, and without `gh` prints the two git commands instead.
+- **Keep the tool.** The install ends with `uv tool install`, so `agent` stays on PATH after `uvx` exits.
+- **State is separate.** The profile is in `~/.agents/profile`, which an upgrade never touches. `local.toml` records where it is.
+- **Preflight before writing.** A clone over ssh fails halfway through when git auth is not set up on a new Mac. Check that the URL is reachable first and change nothing if it is not.
+- **`agent profile eject <standard>`** copies a hub standard into the profile, where a same-named file already replaces it. Today a profile standard starts from nothing.
+- **Privacy.** A profile holds how you work and your models. `doctor` warns when its remote is public (`gh repo view --json isPrivate`), and `agent profile` says when it has no remote at all, since other machines will not get it.
+- **Backend.** `[backends]` lives in the profile's `config.toml`, and `agent sub review` does nothing until one is set. The first run asks which of claude, codex or ollama this machine has, and writes it.
+
 ## Versioning
 
 Semver, starting at the first install. Bump `version` in `pyproject.toml` and tag `vX.Y.Z`. A major bump is a change to what INTEGRATION.md specifies (`agents-hub/1`, the config keys, the `.agents` convention); a minor adds a command or key; the GitHub release notes are the changelog. Pin with `uv tool install git+...@v0.2.0`. PyPI later, if the name is free.
@@ -55,6 +76,11 @@ Semver, starting at the first install. Bump `version` in `pyproject.toml` and ta
 - [ ] `agent install` copies hooks and writes `settings.hooks.json` for an install; `doctor` checks it.
 - [ ] `agent update` and `version()` for both modes.
 - [ ] `install.sh` becomes `uv tool install ...` then `agent install`; README says so, with the clone as the dev path.
+- [ ] `agent install` offers to make a profile, creates the private remote through `gh`, and takes `--profile new|URL|DIR|none`; a test runs it with no terminal and with a temp `HOME`.
+- [ ] Preflight the profile URL's reachability before the install writes anything.
+- [ ] `agent profile eject <standard>`.
+- [ ] `doctor` warns on a public profile remote, and `agent profile` on a missing one.
+- [ ] Ask which backend this machine has on first run and write it to the profile's `config.toml`.
 - [ ] Tag `v0.2.0` once an install on a Mac and on this machine both pass `agent doctor`.
 
 ## Open

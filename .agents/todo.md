@@ -19,7 +19,7 @@ kind: todo
 ## Next
 
 - [ ] Shared mode: notice when others commit in a repo, and step the profile back to `polite` or `restricted`, with line notices for code someone else wrote. The design is in [[shared-mode]]; one question is open.
-- [ ] Ship `.agents` as a `uv tool install` rather than a clone, and version it from the first install: bump `version` in pyproject.toml and tag `vX.Y.Z`. It stays 0.1.0 until then. The design is in [[uv-install]]; the part that is more than packaging is that standards, agents, templates and hooks sit beside the code, not in it.
+- [ ] Ship `.agents` as a `uv tool install` rather than a clone, and version it from the first install: bump `version` in pyproject.toml and tag `vX.Y.Z`. It stays 0.1.0 until then. The design is in [[uv-install]]: standards, agents, templates and hooks sit beside the code, not in it, and the install should also make your profile, its private remote and a backend in one command.
 - [ ] Generate `~/.claude/agents/*.md` from `agents/*.md` at install time, for definitions that want the parent model to invoke them rather than a hook. Without it, native subagents drift as a second copy.
 - [ ] Prove the codex backend end to end. The event shapes are confirmed and unit-tested, but no real `agent sub run --backend codex` has been through resume yet.
 
