@@ -44,6 +44,16 @@ def published(parent: Path, name: str) -> tuple[Path, Path]:
   return bare, clone
 
 
+def fake_gh(parent: Path, monkeypatch, body: str) -> Path:
+  """A gh first on PATH that logs its arguments, then runs `body`; returns the log."""
+  (directory := parent / "fake").mkdir(exist_ok=True)
+  (directory / "gh").write_text(f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$GH_LOG"\n{body}\n')
+  (directory / "gh").chmod(0o755)
+  monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")
+  monkeypatch.setenv("GH_LOG", str(parent / "gh.log"))
+  return parent / "gh.log"
+
+
 def test_the_profile_is_found_from_the_environment_then_local_toml_then_the_default(isolated, monkeypatch):
   """The environment wins over local.toml, which wins over the default; empty means none, and a broken local.toml is none."""
   hub.LOCAL.write_text("[profile\npath = ")
@@ -61,6 +71,61 @@ def test_the_profile_is_found_from_the_environment_then_local_toml_then_the_defa
   for value, expected in ((str(isolated / "env"), isolated / "env"), ("", None)):
     monkeypatch.setenv("AGENTS_PROFILE", value)
     assert profile.path() == expected
+
+
+def test_a_profile_is_unasked_only_with_none_in_force_and_no_choice_recorded(isolated, monkeypatch):
+  """Install may still ask only when no profile is found and local.toml has recorded neither a path nor a choice of none."""
+  assert profile.unasked()
+
+  profile.DEFAULT.mkdir(parents=True)   # one in force, found by default
+  assert not profile.unasked()
+  profile.DEFAULT.rmdir()
+  assert profile.unasked()
+
+  monkeypatch.setenv("AGENTS_PROFILE", str(isolated / "env"))   # one in force, named by the environment
+  assert not profile.unasked()
+  monkeypatch.delenv("AGENTS_PROFILE")
+
+  profile.save(None)   # a choice of none: nothing in force, and nothing left to ask
+  assert profile.path() is None and not profile.unasked()
+
+
+def test_a_repo_is_published_when_it_has_a_remote_and_by_default_the_profile_is_the_one_asked_about(isolated, monkeypatch):
+  """published is about the repo it is given: a plain directory and a repo with no remote are not, a clone is."""
+  (nowhere := isolated / "nowhere").mkdir()
+  git.run(isolated, "init", "-q", "-b", "main", str(lone := isolated / "lone"))
+  _, clone = published(isolated, "theirs")
+  assert [profile.published(where) for where in (nowhere, lone, clone)] == [False, False, True]
+  assert not profile.published()   # isolated's default profile, which does not exist
+  monkeypatch.setattr(profile, "DEFAULT", clone)   # read when asked, so a test's default is the one checked
+  assert profile.published()
+
+
+def test_publishing_the_profile_makes_a_private_repo_through_gh_and_reports_why_it_could_not(isolated, monkeypatch):
+  """publish asks gh for a private repo from the default profile, pushed, and returns one line: made, or FAIL with the last line gh gave."""
+  log = fake_gh(isolated, monkeypatch, "exit 0")
+  assert profile.publish("tester") == ["  made  tester/.agents.profile, private, and pushed"]
+  assert log.read_text() == f"repo create tester/.agents.profile --private --source {profile.DEFAULT} --remote origin --push\n"
+
+  for body, said in (('echo "GraphQL: name already exists" >&2; echo "gh: try another name" >&2; exit 1', "gh: try another name"), ('echo "only stdout"; exit 1', "only stdout"), ("exit 1", "gh said nothing")):
+    fake_gh(isolated, monkeypatch, body)
+    assert profile.publish("tester") == [f"  FAIL  {said}"]
+
+  (isolated / "bare").mkdir()
+  monkeypatch.setenv("PATH", str(isolated / "bare"))   # no gh at all
+  assert profile.publish("tester") == ["  FAIL  gh is not installed: https://cli.github.com"]
+
+
+def test_a_missing_default_backend_is_told_as_a_reason_and_as_advice_naming_the_backends(isolated, monkeypatch):
+  """unset is only the advice, naming each backend; get exits with UNSET and then the advice, and a named backend needs no default."""
+  (isolated / "config.toml").write_text('[backends.claude]\nkind = "cli"\nargv = ["claude"]\n[backends.ollama]\nkind = "http"\nurl = "x"\n')
+  monkeypatch.setattr(hub, "CONFIG", isolated / "config.toml")
+  assert backends.UNSET == "no default backend is set, so a review has nowhere to run"
+  assert backends.unset() == "`agent install --backend <claude|ollama>`, or run this at a terminal to be asked"
+
+  with pytest.raises(SystemExit) as stopped: backends.get()
+  assert stopped.value.code == "no default backend is set, so a review has nowhere to run: `agent install --backend <claude|ollama>`, or run this at a terminal to be asked"
+  assert backends.get("ollama").name == "ollama"
 
 
 @pytest.mark.parametrize("before", ['# mine\n[profile]\npath = "/old"\nnote = "keep"\n\n[mine]\nkept = true\n', '[profile]  # mine\n  path = "/old"\nnote = "keep"\n', '[mine]\nkept = true\n', ""])
@@ -138,11 +203,12 @@ def test_dropping_the_profile_drops_its_pointers_whole_line(isolated, monkeypatc
 
 
 def test_a_profile_is_adopted_checked_for_drift_updated_and_made(isolated, monkeypatch, capsys):
-  """A directory is used in place, a remote is cloned once and never over a different one, drift names what is unpushed, update fails rather than merge, and init reports only what it made."""
+  """A directory is used in place and a blank name refused, a remote is cloned once and never over a different one, drift names what is unpushed, update fails rather than merge, and init reports only what it made."""
   mine = isolated / "dotfiles"
   mine.mkdir()
   assert profile.adopt(str(mine))[0] == 0 and profile.path() == mine.resolve() and not profile.DEFAULT.exists()
   assert profile.adopt(str(isolated / "nowhere"))[0] == 1
+  assert all(profile.adopt(blank)[0] == 1 for blank in ("", "  ")) and profile.path() == mine.resolve()   # a blank name is refused, not taken for the current directory
 
   bare, clone = published(isolated, "theirs")   # a path ending .git reads as a remote, as a URL would
   code, said = profile.adopt(str(bare))

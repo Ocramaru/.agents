@@ -4,6 +4,6 @@ Author: Marco Cassar (@Ocramaru)
 """
 
 from agentkit.command import run as main
-from agentkit.cli import notes, setup, sub  # noqa: F401  imported to register their commands
+from agentkit.cli import notes, profile, hooks, setup, sub  # noqa: F401  imported to register their commands
 
 __all__ = ["main"]

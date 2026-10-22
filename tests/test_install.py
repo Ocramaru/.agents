@@ -32,9 +32,6 @@ esac
 """
 
 
-CHANGES ={"copy", "link", "saved", "wrote", "point"}   # the first word of an install line that changed something
-
-
 def commit(repo: Path, blocked: bool = False) -> list[str]:
   """Commit one more line through our hooks directory, and return what the hooks have written to `marks` so far."""
   with (repo / "f.txt").open("a") as handle: handle.write("another line\n")
@@ -68,9 +65,10 @@ def test_install_wires_claude_once_and_leaves_the_rest_alone(home):
   assert (home / ".agents").resolve() == hub.HOME   # linked, since it was missing
   assert (home / ".local" / "bin" / "agent").resolve() == hub.BUNDLED / "bin" / "agent"
   assert (home / ".claude" / "CLAUDE.md").read_text().count("AGENTS.md") == 1
+  assert {line.strip().partition(" ")[0] for line in lines} & set(install.CHANGED) == {"link", "saved", "wrote", "point"}   # the words install says a change with
 
   code, lines = install.run([])
-  changes = [line for line in lines if line.strip().partition(" ")[0] in CHANGES]
+  changes = [line for line in lines if line.strip().partition(" ")[0] in install.CHANGED]
   assert code == 0 and changes == [], changes
   assert f"  ok    .agents -> {hub.HOME}" in lines   # a second run says the link it found
 
@@ -127,7 +125,7 @@ def test_an_install_copies_what_agents_name_by_path_into_home_and_its_hooks_reac
   fired = subprocess.run(["bash", str(home / ".agents" / "hooks" / "inject.sh")], input=json.dumps(payload), capture_output=True, check=True, text=True, env=machine)
   assert json.loads(fired.stdout)["systemMessage"].startswith(".agents loaded")
 
-  assert not {line.split()[0] for line in fresh(["install"]).stdout.splitlines() if line.strip()} & CHANGES
+  assert {line.split()[0] for line in fresh(["install"]).stdout.splitlines() if line.strip()}.isdisjoint(install.CHANGED)
   assert "ok    hooks, githooks, commands and AGENTS.md in" in fresh(["doctor"], expect=None).stdout
   (home / ".agents" / "hooks" / "inject.sh").write_text("stale\n")
   assert "FAIL  hooks, githooks, commands and AGENTS.md in" in fresh(["doctor"], expect=1).stdout
@@ -169,6 +167,60 @@ def test_update_upgrades_an_install_through_uv_and_lands_the_new_hooks(machine, 
   assert failed.returncode == 1 and f"FAIL   .agents: upgraded {number}.1 -> {number}.2, but its install did not finish (cannot install: " in failed.stdout and "is a clone of .agents" in failed.stdout
 
 
+def scripted(monkeypatch, **answers) -> list:
+  """Stand in for uv and the new `agent`: install's subprocess answers by the first word after the program (`uv` for uv itself), and every call lands in the returned list."""
+  calls = []
+
+  def run(argv, **options):
+    calls.append((argv, options))
+    answer = answers[argv[0] if argv[0] == "uv" else argv[1]]
+    if isinstance(answer, Exception): raise answer
+    return subprocess.CompletedProcess(argv, *answer)
+
+  monkeypatch.setattr(install.subprocess, "run", run)
+  monkeypatch.setattr(hub, "version", lambda: "1.0")
+  return calls
+
+
+def test_upgrade_installs_nothing_when_the_version_did_not_move(monkeypatch):
+  """When the upgraded code reports the version it had, upgrade says so and never runs its install."""
+  calls = scripted(monkeypatch, uv=(0, "", ""), **{"--version": (0, "agentkit 1.0\n", "")})
+  assert install.upgrade() == (0, ["ok     .agents: already current at 1.0"])
+  assert [argv[:3] for argv, _ in calls] == [["uv", "tool", "upgrade"], [str(install.CLI), "--version"]]
+
+
+def test_upgrade_lists_what_the_new_install_changed_and_asks_it_nothing(monkeypatch):
+  """A moved version runs the new `agent install --changes` with stdin closed, and its lines follow the upgrade line indented."""
+  calls = scripted(monkeypatch, uv=(0, "", ""), **{"--version": (0, "agentkit 1.1\n", ""), "install": (0, "copy  1 file into ~/.agents\nwrote hooks block in settings.json\n\n", "")})
+  assert install.upgrade() == (0, ["ok     .agents: upgraded 1.0 -> 1.1", "       copy  1 file into ~/.agents", "       wrote hooks block in settings.json"])
+  argv, options = calls[-1]
+  assert argv == [str(install.CLI), "install", "--changes"] and options["stdin"] == subprocess.DEVNULL
+
+
+def test_upgrade_fails_with_the_last_line_uv_or_the_new_install_gave(monkeypatch):
+  """A missing or failing uv, and an install that exits non-zero, each give code 1 and the reason in one line; the install's own lines follow."""
+  scripted(monkeypatch, uv=FileNotFoundError("uv"))
+  assert install.upgrade() == (1, ["FAIL   .agents: uv is not on PATH"])
+  scripted(monkeypatch, uv=(2, "", "warning: x\nerror: no index\n\n"))
+  assert install.upgrade() == (1, ["FAIL   .agents: error: no index"])
+
+  scripted(monkeypatch, uv=(0, "", ""), **{"--version": (0, "agentkit 1.1\n", ""), "install": (1, "cannot install: ~/.agents is a clone\n", "")})
+  assert install.upgrade() == (1, ["FAIL   .agents: upgraded 1.0 -> 1.1, but its install did not finish (cannot install: ~/.agents is a clone); run `agent install`", "       cannot install: ~/.agents is a clone"])
+  scripted(monkeypatch, uv=(0, "", ""), **{"--version": (0, "agentkit 1.1\n", ""), "install": (1, "", "")})
+  assert install.upgrade() == (1, ["FAIL   .agents: upgraded 1.0 -> 1.1, but its install did not finish (it said nothing); run `agent install`"])
+
+
+def test_handing_over_runs_the_kept_agent_with_these_arguments_and_a_path_without_uvxs_own_environment(monkeypatch, tmp_path):
+  """The kept `agent` replaces this process with this process's arguments, and PATH loses every entry that is uvx's `sys.prefix/bin`, a link to it included, and nothing else."""
+  alias, calls = tmp_path / "alias", []
+  alias.symlink_to(Path(sys.prefix) / "bin")
+  monkeypatch.setenv("PATH", os.pathsep.join([str(alias), str(tmp_path / "first"), str(Path(sys.prefix) / "bin"), str(tmp_path / "second")]))
+  monkeypatch.setattr(sys, "argv", ["agent", "install", "--profile", "none"])
+  monkeypatch.setattr(install.os, "execve", lambda *call: calls.append(call))
+  install.hand_over("/kept/agent")
+  assert calls == [("/kept/agent", ["/kept/agent", "install", "--profile", "none"], os.environ | {"PATH": os.pathsep.join([str(tmp_path / "first"), str(tmp_path / "second")])})]
+
+
 def test_an_install_through_uvx_keeps_agentkit_as_a_tool_and_installs_from_it(wheel, machine, tmp_path):
   """`uvx --from <wheel> agent install` leaves `agent` installed as a uv tool, and the install that ran is that tool's, so its hooks call it."""
   home = Path(machine["HOME"])
@@ -183,7 +235,7 @@ def test_install_sh_installs_the_tool_then_wires_the_machine_and_reruns_cleanly(
   (Path(machine["HOME"]) / ".claude").mkdir(parents=True)
   run = lambda: subprocess.run(["bash", str(REPO / "install.sh")], capture_output=True, check=True, cwd=tmp_path, env=machine | {"AGENTS_SOURCE": str(wheel)}, start_new_session=True, stdin=subprocess.DEVNULL, text=True).stdout   # no terminal to hand over
   assert "wrote hooks block in settings.json" in run() and (tmp_path / "bin" / "agent").is_file()
-  assert not {line.split()[0] for line in run().splitlines() if line.strip()} & CHANGES
+  assert {line.split()[0] for line in run().splitlines() if line.strip()}.isdisjoint(install.CHANGED)
 
 
 def test_install_asks_for_a_profile_once_and_only_at_a_terminal_with_gh_logged_in(fresh, installed, machine, tmp_path):
@@ -366,6 +418,52 @@ def test_the_global_hook_is_refused_when_there_are_no_hooks_to_point_at(home, tm
   monkeypatch.setattr(install, "GITHOOKS", tmp_path / "nowhere")
   code, message = install.global_install()
   assert code == 1 and "run `agent install` first" in message and install.global_hooks_path() == ""
+
+
+def test_the_repo_hook_goes_beside_any_hook_quotes_its_arguments_and_uninstall_removes_only_ours(tmp_path):
+  """Install moves a hook that is not ours aside without clobbering an older backup, writes an executable shim with shell-quoted arguments, and uninstall removes only that shim."""
+  repo = git(tmp_path / "repo")
+  hook = repo / ".git" / "hooks" / "post-commit"
+  hook.parent.mkdir(parents=True, exist_ok=True)
+  hook.write_text("echo mine\n")
+  hook.with_name("post-commit.bak").write_text("echo older\n")
+  subprocess.run(["git", "config", "core.hooksPath", str(tmp_path / "elsewhere")], cwd=repo, check=True)   # where git reads hooks, but not where `githooks/_dispatch` looks for the repo's own
+  assert install.repo_hook(repo) == hook and not install.repo_hook_ours(repo)
+  assert install.repo_uninstall(repo) == (1, f"not ours, leaving it alone: {hook}") and hook.read_text() == "echo mine\n"
+
+  code, lines = install.repo_install(repo, "auto", "")
+  assert code == 0 and lines[:2] == ["moved the hook already there aside to post-commit.bak1", f"installed {hook}"] and len(lines) == 3
+  assert lines[2] == f"  auto reviews each commit into {repo / '.agents' / '.reviews' / 'reviews.duckdb'}"
+  assert sorted(saved.read_text() for saved in hook.parent.glob("post-commit.bak*")) == ["echo mine\n", "echo older\n"]   # never eaten
+  assert os.access(hook, os.X_OK) and install.repo_hook_ours(repo)
+
+  assert len(install.repo_install(repo, "a b; echo hi", "")[1]) == 2   # ours already, so nothing to move aside
+  assert "post-commit.sh\" 'a b; echo hi' ''\n" in hook.read_text()
+  assert install.repo_uninstall(repo) == (0, f"removed {hook}") and not hook.exists()
+  assert install.repo_uninstall(repo) == (1, f"nothing installed at {hook}")
+
+  shutil.rmtree(hook.parent)   # a repo made without git's template hooks
+  assert install.repo_install(repo, "auto", "")[0] == 0 and install.repo_hook_ours(repo)
+
+
+def test_the_repo_hook_in_a_linked_worktree_goes_where_git_reads_it_and_runs_on_a_commit(home, tmp_path):
+  """A linked worktree's `.git` is a file, so install writes into the main repo's hooks folder, where git runs it for a commit in either checkout, and uninstall from the other checkout removes it."""
+  (home / ".agents" / "hooks").mkdir(parents=True)
+  (home / ".agents" / "hooks" / "post-commit.sh").write_text(f"#!/usr/bin/env bash\necho \"ran $*\" >> {tmp_path}/marks\n")   # where the real review would start, so no model is called
+  (home / ".agents" / "hooks" / "post-commit.sh").chmod(0o755)
+  main, linked, identity = git(tmp_path / "main"), tmp_path / "linked", ["-c", "user.name=T", "-c", "user.email=t@t.io"]
+  subprocess.run(["git", *identity, "commit", "-q", "--allow-empty", "-m", "first"], cwd=main, check=True)
+  subprocess.run(["git", "worktree", "add", "-q", str(linked)], cwd=main, check=True)
+  assert (linked / ".git").is_file() and install.repo_hook(linked).resolve() == (main / ".git" / "hooks" / "post-commit").resolve()
+
+  code, lines = install.repo_install(linked, "auto", "ollama")
+  assert code == 0 and lines[0] == f"installed {install.repo_hook(linked)}" and install.repo_hook_ours(main) and install.repo_hook_ours(linked)
+  subprocess.run(["git", *identity, "commit", "-q", "--allow-empty", "-m", "in the worktree"], cwd=linked, check=True)
+  subprocess.run(["git", *identity, "commit", "-q", "--allow-empty", "-m", "in the main checkout"], cwd=main, check=True)
+  assert (tmp_path / "marks").read_text() == "ran auto ollama\nran auto ollama\n"
+
+  assert install.repo_uninstall(main) == (0, f"removed {install.repo_hook(main)}") and not install.repo_hook_ours(linked)
+  assert install.repo_uninstall(linked)[0] == 1
 
 
 def test_a_commit_runs_the_repos_own_hook_first_and_is_reviewed_only_where_a_note_says_so(home, tmp_path):

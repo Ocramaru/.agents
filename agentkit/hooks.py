@@ -50,10 +50,6 @@ def errors() -> list[list[str]]:
   return [row for row in entries() if row[3].startswith("ERROR") and datetime.fromisoformat(row[0]) > since]
 
 
-STYLE = {"ERROR": "bold red", "BLOCKED": "yellow", "sent": "green", "quiet": "dim", "none": "dim",
-         "review": "cyan", "done": "green"}
-
-
 def log(hook: str, session: str, text: str, log: Path = LOG) -> None:
   """One line in the format hooks/log.sh writes, for work such as a review that outlives its hook.
 

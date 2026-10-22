@@ -21,6 +21,7 @@ from pathlib import Path
 from agentkit import config, hub, profile
 
 PLACEHOLDER = re.compile(r"\{(model|prompt|session|effort)\}")
+UNSET = "no default backend is set, so a review has nowhere to run"
 
 
 def _fill(template: list[str], values: dict[str, str]) -> list[str]:
@@ -58,7 +59,7 @@ class Backend:
     return int(self.spec.get("timeout", 300))
 
   def release(self, role: str) -> bool:
-    """Ask the backend to unload this model, returning True if asked; an unset `release_url` means nothing to release.
+    """Ask the backend to unload this model, returning True only when it answered; an unset `release_url` means nothing to release.
     A local server keeps a model loaded for its keep-alive after the last request, whoever else needs the memory."""
     url = self.spec.get("release_url")
     if not url: return False
@@ -167,14 +168,14 @@ def load_backends() -> tuple[dict[str, Backend], str]:
 
 def unset() -> str:
   """What to do when no default backend is set, naming the ones there are."""
-  return f"no default backend is set, so a review has nowhere to run: `agent install --backend <{'|'.join(load_backends()[0])}>`, or run this at a terminal to be asked"
+  return f"`agent install --backend <{'|'.join(load_backends()[0])}>`, or run this at a terminal to be asked"
 
 
 def get(name: str | None = None) -> Backend:
   """The named backend, or the default; exits if it is unknown or none is set."""
   backends, default = load_backends()
   chosen = name or default
-  if not chosen: raise SystemExit(unset())
+  if not chosen: raise SystemExit(f"{UNSET}: {unset()}")
   if chosen not in backends: raise SystemExit(f"unknown backend {chosen!r}. known: {', '.join(sorted(backends))}")
   return backends[chosen]
 

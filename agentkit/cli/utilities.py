@@ -68,4 +68,4 @@ class CliHelpers:
     """0 when a review has a backend: one named, the default, or one chosen now at a terminal; otherwise say how to set one and return 2."""
     if named or backends.load_backends()[1]: return 0
     if CliHelpers.ask("No default backend is set, so a review has nowhere to run. Set one now?", default=True) and CliHelpers.ask_backend(): return 0   # with no terminal the first answers yes and the second chooses nothing
-    return fail(backends.unset(), 2)
+    return fail(f"{backends.UNSET}: {backends.unset()}", 2)

@@ -7,17 +7,25 @@ Author: Marco Cassar (@Ocramaru)
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import NoReturn
 
-from agentkit import git, hub, profile as _profile
+from agentkit import git, hub, profile as _profile, reviews
 
 GITHOOKS = hub.HOME / "githooks"
 CLI = Path(sys.executable).parent / "agent" if hub.INSTALLED else hub.BUNDLED / "bin" / "agent"   # the `agent` this code runs as, and the one hooks should find
 FIXED = ("AGENTS.md", "commands", "githooks", "hooks")   # what agents and git name by path under ~/.agents, so an install keeps a copy there
 POINTER = "The `.agents/` notes convention, the standards, and how they load:"
+CHANGED = ("copy", "link", "saved", "wrote", "point", "made", "set", "clone")   # the first word of an install line that changed something
+HOOK_MARK = "# installed by `agent hook install`"
+HOOK = f"""#!/usr/bin/env bash
+{HOOK_MARK} -- review each commit into this repo's reviews.
+exec "$HOME/.agents/hooks/post-commit.sh" {{agent}} {{backend}}
+"""
 
 
 def config_dir(target: str) -> Path:
@@ -137,7 +145,7 @@ def preflight(profile: str | None = None) -> list[str]:
   if profile and "git" not in missing and _profile.remote(profile) and git.run(_profile.DEFAULT, "remote", "get-url", "origin").stdout.strip() != profile:   # with no git, the line above says so
     try: reached = subprocess.run(["git", "ls-remote", profile, "HEAD"], capture_output=True, check=False, text=True, timeout=60, env=os.environ | {"GIT_TERMINAL_PROMPT": "0", "GIT_SSH_COMMAND": os.environ.get("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")})
     except subprocess.TimeoutExpired: reached = subprocess.CompletedProcess([], 1, "", "no answer in 60 seconds")
-    if reached.returncode: problems.append(f"cannot reach {profile}: {(reached.stderr.strip().splitlines() or ['git said nothing'])[-1]}. `git ls-remote {profile}` should work first; nothing was changed")
+    if reached.returncode: problems.append(f"cannot reach {profile}: {git.last_line(reached, 'git said nothing')}. `git ls-remote {profile}` should work first; nothing was changed")
   return problems
 
 
@@ -155,9 +163,30 @@ def keep(profile: str | None = None) -> tuple[int, str]:
   found = hub.source()   # the next line names it again for uv: git+URL@revision for git, the URL for a file or directory, the name for an index
   vcs = found.get("vcs_info", {})
   kept = subprocess.run(["uv", "tool", "install", f"agentkit @ {'git+' if vcs else ''}{found['url']}{'@' + vcs['requested_revision'] if vcs.get('requested_revision') else ''}" if found else "agentkit"], capture_output=True, check=False, text=True)
-  if kept.returncode: return 1, f"could not keep agentkit as a uv tool: {(kept.stderr.strip().splitlines() or ['uv said nothing'])[-1]}"
+  if kept.returncode: return 1, f"could not keep agentkit as a uv tool: {git.last_line(kept, 'uv said nothing')}"
   if not (tools := subprocess.run(["uv", "tool", "dir", "--bin"], capture_output=True, check=False, text=True).stdout.strip()): return 1, "kept agentkit as a uv tool, but `uv tool dir --bin` does not say where; run `agent install` from there"
   return 0, str(Path(tools) / "agent")
+
+
+def hand_over(kept: str) -> NoReturn:
+  """Run the kept tool's `agent` in this one's place with the same arguments, and a PATH without uvx's own environment, which leads it."""
+  os.execve(kept, [kept, *sys.argv[1:]], os.environ | {"PATH": os.pathsep.join(entry for entry in os.environ.get("PATH", "").split(os.pathsep) if Path(entry).resolve() != (Path(sys.prefix) / "bin").resolve())})
+
+
+def upgrade() -> tuple[int, list[str]]:
+  """Upgrade an install through uv and let the new version install its own hooks: the exit code and the lines to print."""
+  was = hub.version()
+  try: upgraded = subprocess.run(["uv", "tool", "upgrade", "agentkit"], capture_output=True, check=False, text=True)
+  except FileNotFoundError: upgraded = subprocess.CompletedProcess(["uv"], 127, "", "uv is not on PATH")
+  if upgraded.returncode: return 1, [f"FAIL   .agents: {git.last_line(upgraded, 'uv said nothing')}"]
+
+  now = subprocess.run([str(CLI), "--version"], capture_output=True, check=False, text=True).stdout.strip().removeprefix("agentkit ")   # the new code says its version
+  if now == was: return 0, [f"ok     .agents: already current at {now}"]
+
+  copied = subprocess.run([str(CLI), "install", "--changes"], capture_output=True, check=False, stdin=subprocess.DEVNULL, text=True)   # no terminal, so it never asks
+  said = [f"       {text.strip()}" for text in copied.stdout.splitlines() if text.strip()]
+  if copied.returncode: return 1, [f"FAIL   .agents: upgraded {was} -> {now}, but its install did not finish ({git.last_line(copied, 'it said nothing')}); run `agent install`", *said]
+  return 0, [f"ok     .agents: upgraded {was} -> {now}", *said]
 
 
 def run(targets: list[str], create: bool = False, profile: str | None = None) -> tuple[int, list[str]]:
@@ -222,7 +251,7 @@ def run(targets: list[str], create: bool = False, profile: str | None = None) ->
   return 0, lines
 
 
-# -- git: one set of hooks for every repo, acting only where a repo has opted in -------------------
+# -- git: one set of hooks for every repo, acting only where a repo has opted in, or one repo's own ---
 
 def global_hooks_path() -> str:
   """git's global `core.hooksPath`, or `""` when unset."""
@@ -259,3 +288,32 @@ def global_uninstall() -> tuple[int, str]:
     return 1, f"core.hooksPath is {current}, which is not ours. Leaving it alone."
   subprocess.run(["git", "config", "--global", "--unset", "core.hooksPath"], check=True)
   return 0, "unset core.hooksPath; every repo is back to its own .git/hooks"
+
+
+def repo_hook(root: Path) -> Path:
+  """Where `root`'s own post-commit hook lives, in the common git folder that `githooks/_dispatch` reads too: a linked worktree's `.git` is a file, and its hooks are the main checkout's."""
+  return root / git.run(root, "rev-parse", "--git-common-dir").stdout.strip() / "hooks" / "post-commit"
+
+
+def repo_hook_ours(root: Path) -> bool:
+  """Whether the post-commit hook in `root` is the shim this module writes."""
+  return (hook := repo_hook(root)).is_file() and HOOK_MARK in hook.read_text(encoding="utf-8", errors="replace")
+
+
+def repo_install(root: Path, agent: str, backend: str) -> tuple[int, list[str]]:
+  """Write the review shim as `root`'s post-commit hook, moving one that is not ours aside to a free `.bak` name: the exit code and the lines to print."""
+  destination, lines = repo_hook(root), []
+  if destination.exists() and not repo_hook_ours(root): lines.append(f"moved the hook already there aside to {destination.rename(backup(destination)).name}")
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  destination.write_text(HOOK.format(agent=shlex.quote(agent), backend=shlex.quote(backend)), encoding="utf-8")   # quoted: these land in a bash script run on every commit, where a space or a ; would be code
+  destination.chmod(0o755)
+  return 0, [*lines, f"installed {destination}", f"  {agent} reviews each commit into {reviews.path(root, create=False)}"]
+
+
+def repo_uninstall(root: Path) -> tuple[int, str]:
+  """Remove `root`'s post-commit hook when it is ours: (0, what was removed) or (1, why not)."""
+  destination = repo_hook(root)
+  if not destination.exists(): return 1, f"nothing installed at {destination}"
+  if not repo_hook_ours(root): return 1, f"not ours, leaving it alone: {destination}"
+  destination.unlink()
+  return 0, f"removed {destination}"

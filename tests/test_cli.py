@@ -151,24 +151,24 @@ def test_a_failed_review_says_why_and_is_not_offered_a_reply(project, monkeypatc
   assert shown.count("agent sub review --recheck a.py") == 1 and "agent sub reply" not in shown   # found, not failed
 
 
-def test_the_commit_hook_installs_beside_any_hook_and_quotes_its_arguments(project):
-  """Install moves a foreign hook aside without clobbering an older backup, uninstall removes only ours, and arguments are shell-quoted."""
+def test_the_commit_hook_commands_say_what_they_did_and_exit_on_it(project):
+  """`agent hook` reports a foreign hook on stderr with exit 1, status exits 1 until ours is in, and install and uninstall say what they moved and removed; what the hook itself does is test_install's."""
   hook = project / ".git" / "hooks" / "post-commit"
   hook.parent.mkdir(parents=True, exist_ok=True)
   hook.write_text("echo mine\n")
-  hook.with_name("post-commit.bak").write_text("echo older\n")
 
   assert "not ours" in agent(["hook", "uninstall"], cwd=project, expect=1).stderr
-  assert hook.read_text() == "echo mine\n"
   agent(["hook", "status"], cwd=project, expect=1)
   assert "moved the hook already there aside" in agent(["hook", "install"], cwd=project).stdout
-  assert sorted(saved.read_text() for saved in hook.parent.glob("post-commit.bak*")) == ["echo mine\n", "echo older\n"]   # never eaten
   agent(["hook", "status"], cwd=project)
   assert "removed" in agent(["hook", "uninstall"], cwd=project).stdout
   assert not hook.exists()
 
-  agent(["hook", "install", "--agent", "a b; echo hi"], cwd=project)
-  assert "'a b; echo hi'" in hook.read_text()
+
+def test_agent_profile_without_a_profile_points_at_install(project):
+  """With no profile, `agent profile` says how to make, clone or choose one through `agent install --profile`, not through the command it replaced."""
+  said = agent(["profile"], cwd=project).stdout
+  assert "agent install --profile new|URL|DIR|none" in said and "agent profile init" not in said
 
 
 def test_a_file_left_out_by_limit_is_not_called_one_no_standard_covers(project):

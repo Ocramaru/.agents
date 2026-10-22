@@ -11,7 +11,7 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-from agentkit import git, hub
+from agentkit import gh, git, hub
 
 DEFAULT = hub.HOME / "profile"   # where a profile is made or cloned when none is named
 
@@ -31,6 +31,11 @@ def chosen() -> str | None:
   return saved if isinstance(table := local.get("profile"), dict) and isinstance(saved := table.get("path"), str) else None   # nor is one of the wrong shape
 
 
+def unasked() -> bool:
+  """Whether no profile is in force and local.toml records no choice, so install has not yet had an answer."""
+  return path() is None and chosen() is None
+
+
 def file(name: str) -> Path | None:
   """One piece of the profile, such as `standards` or `config.toml`, if it has that piece."""
   root = path()
@@ -45,6 +50,7 @@ def save(where: Path | None) -> None:
 
 def adopt(source: str) -> tuple[int, str]:
   """Make `source` this machine's profile and remember it: `new` makes one at the default path, `none` records that there is none, a URL is cloned and a directory used where it is."""
+  if not source.strip(): return 1, "name a profile: new, none, a URL or a directory"   # Path("") is the current directory
   if source == "none":
     save(None)
     return 0, "set   no profile: the starters in .agents are in use, and install stops asking"
@@ -75,6 +81,17 @@ def adopt(source: str) -> tuple[int, str]:
 def remote(source: str) -> bool:
   """Whether a profile answer names a repo to clone rather than a directory: a URL, an scp-style address, or a path ending .git."""
   return "://" in source or source.endswith(".git") or (":" in source and "@" in source.split(":")[0])
+
+
+def published(where: Path | None = None) -> bool:
+  """Whether the repo at `where`, by default the default profile, has a git remote, which is how a profile reaches other machines."""
+  return bool(git.run(where or DEFAULT, "remote").stdout.strip())
+
+
+def publish(login: str) -> list[str]:
+  """Make `login`/.agents.profile on GitHub, private, from the default profile and push it; the lines to print."""
+  made = gh.run("repo", "create", f"{login}/.agents.profile", "--private", "--source", str(DEFAULT), "--remote", "origin", "--push")
+  return [f"  made  {login}/.agents.profile, private, and pushed" if made.returncode == 0 else f"  FAIL  {git.last_line(made, 'gh said nothing')}"]
 
 
 def drift(where: Path) -> list[str]:

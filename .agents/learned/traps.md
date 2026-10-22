@@ -6,6 +6,12 @@ kind: learned
 
 # Traps
 
+- **A repo's own hooks are neither at `.git/hooks` nor where `--git-path hooks` says.** In a linked worktree `.git` is a file, so `agent hook install` failed with `NotADirectoryError`. `git rev-parse --git-path hooks/post-commit` follows `core.hooksPath`, which here names `~/.agents/githooks`, so `status` and `uninstall` would have looked there and a husky repo's hook would have been moved aside. Join `--git-common-dir` and `hooks/`, as `githooks/_dispatch` does.
+
+- **`git rev-parse HEAD` in a repo with no commits prints `HEAD` and fails.** `update` took it for the commit to count from, so pulling the first commits into an empty clone said "already current". `rev-parse --verify -q HEAD` prints nothing there.
+
+- **A default argument that names a module constant is fixed when the module loads.** `profile.published(where=DEFAULT)` went on checking this machine's profile in a test that moved `profile.DEFAULT`. Default to `None` and read the constant in the body.
+
 - **A default is not an answer.** `CliHelpers.ask` returns its default when nobody can be asked, so the profile question (default `new`) and the backend question (default the first one found) would have made a profile and recorded a backend in every unattended install. They check `CliHelpers.at_terminal()` first. The test that proves it has to make the question's other precondition true (gh logged in, a backend found): with it false the unattended run passes whether or not the guard exists.
 
 - **`NO_COLOR=1` does not make Rich plain.** It drops colour and keeps bold and dim, whose escape codes split `Answer (new):` into three pieces, so a pseudo-terminal test matching a phrase fails. `TERM=dumb` draws no codes at all; `typed()` sets both.
