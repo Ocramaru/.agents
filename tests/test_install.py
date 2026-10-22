@@ -3,11 +3,11 @@
 Author: Marco Cassar (@Ocramaru)
 """
 
-import json, os, select, shutil, signal, subprocess, sys, tomllib, uuid, zipfile
+import json, os, shutil, signal, subprocess, sys, tomllib, uuid, zipfile
 from pathlib import Path
 
 import pytest
-from conftest import REPO, git, note, put
+from conftest import REPO, git, note, put, typed
 
 from agentkit import hooks, hub, install
 
@@ -32,24 +32,7 @@ esac
 """
 
 
-def typed(command: list[str], answers: str, environment: dict, cwd: Path) -> tuple[int, str]:
-  """Run `command` on a pseudo-terminal with `answers` typed ahead, returning its exit code and everything the terminal showed, the echoed answers included."""
-  main, secondary = os.openpty()
-  process = subprocess.Popen(command, stdin=secondary, stdout=secondary, stderr=secondary, cwd=cwd, env=environment, start_new_session=True)
-  os.close(secondary)
-  os.write(main, answers.encode())
-
-  shown = b""
-  while select.select([main], [], [], 30)[0]:   # a prompt left waiting fails the test rather than hanging it
-    try: chunk = os.read(main, 65536)
-    except OSError: break   # the process closed its end
-    if not chunk: break
-    shown += chunk
-  os.close(main)
-  if process.poll() is None: os.killpg(process.pid, signal.SIGKILL)   # its own session, so whatever it started goes too
-  return process.wait(), shown.decode(errors="replace")
-
-CHANGES = {"copy", "link", "saved", "wrote", "point"}   # the first word of an install line that changed something
+CHANGES ={"copy", "link", "saved", "wrote", "point"}   # the first word of an install line that changed something
 
 
 def commit(repo: Path, blocked: bool = False) -> list[str]:
@@ -208,19 +191,42 @@ def test_install_asks_for_a_profile_once_and_only_at_a_terminal_with_gh_logged_i
   home, fake = Path(machine["HOME"]), tmp_path / "fake"
   (home / ".claude").mkdir(parents=True)
   quiet = fresh(["install"]).stdout
-  assert "profile [new]" not in quiet and "No profile chosen" in quiet and not (home / ".agents" / "local.toml").exists()
+  assert "No profile on this machine" not in quiet and "No profile chosen" in quiet and not (home / ".agents" / "local.toml").exists()
   code, shown = typed([str(installed / "agent"), "install", "--backend", "claude"], "", machine, tmp_path)
-  assert code == 0 and "profile [new]" not in shown and "No profile chosen" in shown   # no gh yet, so the question waits
+  assert code == 0 and "No profile on this machine" not in shown and "No profile chosen" in shown   # no gh yet, so the question waits
 
   fake.mkdir()
   (fake / "gh").write_text(FAKE_GH)
   (fake / "gh").chmod(0o755)
   machine.update({"PATH": f"{fake}{os.pathsep}{machine['PATH']}", "GH_LOG": str(tmp_path / "gh.log")})
 
+  quiet = fresh(["install"]).stdout
+  assert "No profile on this machine" not in quiet and "No profile chosen" in quiet and not (home / ".agents" / "profile").exists()   # gh is logged in now, but nobody is there to answer
+
   code, shown = typed([str(installed / "agent"), "install", "--backend", "claude"], "none\n", machine, tmp_path)
-  assert code == 0 and "profile [new]:" in shown and tomllib.loads((home / ".agents" / "local.toml").read_text())["profile"]["path"] == ""
+  assert code == 0 and "No profile on this machine" in shown and "Answer (new):" in shown and tomllib.loads((home / ".agents" / "local.toml").read_text())["profile"]["path"] == ""
   code, shown = typed([str(installed / "agent"), "install"], "", machine, tmp_path)
-  assert code == 0 and "profile [new]" not in shown and "No profile chosen" not in shown
+  assert code == 0 and "No profile on this machine" not in shown and "No profile chosen" not in shown
+
+
+def test_the_profile_question_defaults_to_new_and_takes_a_directory_as_typed(installed, machine, tmp_path):
+  """Enter at the profile question makes a new profile and declines to publish it; a directory typed there is used where it is."""
+  home, other, fake, directory = Path(machine["HOME"]), tmp_path / "other", tmp_path / "fake", tmp_path / "dotfiles"
+  (home / ".claude").mkdir(parents=True)
+  (other / ".claude").mkdir(parents=True)
+  fake.mkdir()
+  directory.mkdir()
+  (fake / "gh").write_text(FAKE_GH)
+  (fake / "gh").chmod(0o755)
+  machine.update({"PATH": f"{fake}{os.pathsep}{machine['PATH']}", "GH_LOG": str(tmp_path / "gh.log")})
+  chosen = lambda where: tomllib.loads((where / ".agents" / "local.toml").read_text())["profile"]["path"]
+
+  code, shown = typed([str(installed / "agent"), "install", "--backend", "claude"], "\n\n", machine, tmp_path)
+  assert code == 0 and (home / ".agents" / "profile" / "standards").is_dir() and chosen(home) == str((home / ".agents" / "profile").resolve())
+  assert "repo create" not in (tmp_path / "gh.log").read_text()   # the second Enter declined to publish
+
+  code, shown = typed([str(installed / "agent"), "install", "--backend", "claude"], f"{directory}\n", machine | {"HOME": str(other)}, tmp_path)
+  assert code == 0 and "Answer (new):" in shown and chosen(other) == str(directory.resolve()) and not (other / ".agents" / "profile").exists()
 
 
 def test_every_profile_answer_works_from_the_flag_at_a_terminal_or_not(fresh, installed, machine, tmp_path):
@@ -232,7 +238,7 @@ def test_every_profile_answer_works_from_the_flag_at_a_terminal_or_not(fresh, in
   chosen = lambda: tomllib.loads((home / ".agents" / "local.toml").read_text())["profile"]["path"]
 
   code, shown = typed([str(installed / "agent"), "install", "--profile", str(bare), "--backend", "claude"], "", machine, tmp_path)
-  assert code == 0 and "profile [new]" not in shown and (home / ".agents" / "profile" / ".git").is_dir() and chosen() == str((home / ".agents" / "profile").resolve())
+  assert code == 0 and "No profile on this machine" not in shown and (home / ".agents" / "profile" / ".git").is_dir() and chosen() == str((home / ".agents" / "profile").resolve())
   fresh(["install", "--profile", str(directory)])
   assert chosen() == str(directory.resolve())
   fresh(["install", "--profile", "none"])
@@ -253,7 +259,7 @@ def test_a_new_profile_is_made_and_published_privately_through_gh_only_when_aske
   assert "a first commit" in said and f"git -C {made} push -u origin main" in said and "Make tester" not in said and (made / "standards").is_dir()
   assert "repo create" not in (tmp_path / "gh.log").read_text()   # no terminal, so never asked
   code, shown = typed([str(installed / "agent"), "install", "--profile", "new", "--backend", "claude"], "\n", machine, tmp_path)
-  assert code == 0 and "Make tester/.agents.profile on GitHub, private" in shown and "repo create" not in (tmp_path / "gh.log").read_text()   # the default is no
+  assert code == 0 and "Make tester/.agents.profile on GitHub, private, and push your profile there? [y/n] (n):" in shown and "repo create" not in (tmp_path / "gh.log").read_text()   # the default is no
 
   code, shown = typed([str(installed / "agent"), "install", "--profile", "new", "--backend", "claude"], "y\n", machine, tmp_path)
   assert code == 0 and "made  tester/.agents.profile, private, and pushed" in shown and "push -u origin main" not in shown
@@ -286,13 +292,32 @@ def test_install_sets_the_backend_from_the_flag_or_asks_once_at_a_terminal(fresh
   assert "FAIL  a default backend is set" in fresh(["doctor"], expect=1).stdout
 
   code, shown = typed([str(installed / "agent"), "install", "--profile", "none"], "ollama\n", machine, tmp_path)
-  assert code == 0 and f"codex    OpenAI Codex CLI       found at {fake / 'codex'}" in shown and "Reviews run on a model" in shown
+  assert code == 0 and f"codex   OpenAI Codex CLI (found at {fake / 'codex'})" in shown and "Reviews run on a model" in shown
   assert default(home / ".agents" / "local.toml") == "ollama"
   code, shown = typed([str(installed / "agent"), "install"], "", machine, tmp_path)
   assert code == 0 and "Reviews run on a model" not in shown   # asked once
 
   fresh(["install", "--profile", "new", "--backend", "codex"])
   assert default(home / ".agents" / "profile" / "config.toml") == "codex"
+
+
+def test_the_backend_question_defaults_to_the_first_one_found_and_an_empty_answer_skips_when_none_is(installed, machine, tmp_path):
+  """With none of the backends here, Enter records nothing; with one here, Enter records it, the question showing it as the default."""
+  home, fake = Path(machine["HOME"]), tmp_path / "fake"
+  (home / ".claude").mkdir(parents=True)
+  (home / ".agents").mkdir(parents=True)
+  fake.mkdir()
+  (home / ".agents" / "local.toml").write_text('[profile]\npath = ""\n\n[backends.claude]\nkind = "cli"\nargv = ["no-claude"]\n\n[backends.codex]\nkind = "cli"\nargv = ["no-codex"]\n\n[backends.ollama]\nkind = "http"\nurl = "http://localhost:1/none"\n')   # none of the three can be found
+  default = lambda: tomllib.loads((home / ".agents" / "local.toml").read_text()).get("backends", {}).get("default")
+
+  code, shown = typed([str(installed / "agent"), "install"], "\n", machine, tmp_path)
+  assert code == 0 and "Answer:" in shown and default() is None
+
+  (fake / "no-codex").write_text("#!/usr/bin/env bash\n")
+  (fake / "no-codex").chmod(0o755)
+  machine["PATH"] = f"{fake}{os.pathsep}{machine['PATH']}"
+  code, shown = typed([str(installed / "agent"), "install"], "\n", machine, tmp_path)
+  assert code == 0 and "Answer (codex):" in shown and default() == "codex"
 
 
 def test_a_review_with_no_backend_says_how_without_a_terminal_and_offers_the_question_at_one(fresh, installed, machine, tmp_path):
@@ -307,10 +332,10 @@ def test_a_review_with_no_backend_says_how_without_a_terminal_and_offers_the_que
   stopped = fresh(["sub", "review", "x.py"], expect=2).stderr
   assert "no default backend is set" in stopped and "agent install --backend <" in stopped and default() is None
   code, shown = typed([str(installed / "agent"), "sub", "review", "x.py"], "n\n", machine, here)
-  assert code == 2 and "Set one now? [Y/n]" in shown and default() is None
+  assert code == 2 and "Set one now? [y/n] (y):" in shown and default() is None
 
-  code, shown = typed([str(installed / "agent"), "sub", "run", "doc-check", "x.py"], "y\necho\n", machine, here)
-  assert code != -signal.SIGKILL and "echo     Echo" in shown and "found at" in shown and default() == "echo"
+  code, shown = typed([str(installed / "agent"), "sub", "run", "doc-check", "x.py"], "\necho\n", machine, here)   # Enter is the yes
+  assert code != -signal.SIGKILL and "echo    Echo (found at" in shown and default() == "echo"
 
 
 def test_an_install_with_no_git_says_so_rather_than_crash_reaching_a_profile(monkeypatch):

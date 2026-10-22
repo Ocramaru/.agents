@@ -5,7 +5,7 @@ The path insert and the profile switch-off live here because pytest imports this
 Author: Marco Cassar (@Ocramaru)
 """
 
-import atexit, json, os, shutil, subprocess, sys, tempfile, time
+import atexit, json, os, select, shutil, signal, subprocess, sys, tempfile, time
 from pathlib import Path
 
 import pytest
@@ -64,6 +64,24 @@ def checkout_home(directory: Path, **extra: str) -> dict:
   (directory / "home").mkdir(exist_ok=True)
   if not (directory / "home" / ".agents").exists(): (directory / "home" / ".agents").symlink_to(REPO)
   return {**os.environ, "HOME": str(directory / "home"), "TMPDIR": str(directory), "UV_CACHE_DIR": UV_CACHE, **extra}
+
+
+def typed(command: list[str], answers: str, environment: dict, cwd: Path) -> tuple[int, str]:
+  """Run `command` on a pseudo-terminal with `answers` typed ahead, returning its exit code and everything the terminal showed, the echoed answers included."""
+  main, secondary = os.openpty()
+  process = subprocess.Popen(command, stdin=secondary, stdout=secondary, stderr=secondary, cwd=cwd, env=environment | {"NO_COLOR": "1", "TERM": "dumb"}, start_new_session=True)   # NO_COLOR alone leaves bold and dim, whose codes split a phrase; a dumb terminal gets none
+  os.close(secondary)
+  os.write(main, answers.encode())
+
+  shown = b""
+  while select.select([main], [], [], 30)[0]:   # a prompt left waiting fails the test rather than hanging it
+    try: chunk = os.read(main, 65536)
+    except OSError: break   # the process closed its end
+    if not chunk: break
+    shown += chunk
+  os.close(main)
+  if process.poll() is None: os.killpg(process.pid, signal.SIGKILL)   # its own session, so whatever it started goes too
+  return process.wait(), shown.decode(errors="replace")
 
 
 @pytest.fixture

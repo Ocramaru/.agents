@@ -16,8 +16,8 @@ from pathlib import Path
 from agentkit import agents, backends, config, git, hooks, review, reviews
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli import show
-from agentkit.cli.setup import settle
 from agentkit.cli.out import done, dump, escape, fail, line, note, say, table, took
+from agentkit.cli.utilities import CliHelpers
 from agentkit.session import Session
 from agentkit.standards import Library
 
@@ -72,7 +72,7 @@ def cmd_run(args) -> int:
   task = args.task or f"{args.agent}-{hashlib.sha1(body.encode()).hexdigest()[:8]}"
   conversation = reviews.conversation(reviews.latest(task, root)) or Session(task)
 
-  if (code := settle(args.backend)): return code
+  if (code := CliHelpers.ensure_backend(args.backend)): return code
   backend, role = backends.get(args.backend), args.role or definition.get("model")
   if (code := _missing_model(args, backend, [role])): return code
   # one file is about that file, so it is reviewed and rechecked as one; several, or a diff, are not
@@ -205,7 +205,7 @@ def cmd_review(args) -> int:
     return 0
 
   if exclude and roots: note(f"excluding {', '.join(exclude)}")  # only discovery honours them
-  if (code := settle(args.backend or settings.get("backend"))): return code
+  if (code := CliHelpers.ensure_backend(args.backend or settings.get("backend"))): return code
   backend = backends.get(args.backend or settings.get("backend"))   # a repo may keep its reviews local
   if (code := _missing_model(args, backend, {args.role or agents.definition(name, found).get("model") for name, _ in plans})): return code
 

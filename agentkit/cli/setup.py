@@ -12,46 +12,13 @@ from pathlib import Path
 from agentkit import backends, config, doctor, gh, git, guard, hooks, hub, install, issue, profile, reviews, status
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli.out import done, escape, fail, line, note, report, table
+from agentkit.cli.utilities import CliHelpers
 
 HOOK_MARK = "# installed by `agent hook install`"
 HOOK = f"""#!/usr/bin/env bash
 {HOOK_MARK} -- review each commit into this repo's reviews.
 exec "$HOME/.agents/hooks/post-commit.sh" {{agent}} {{backend}}
 """
-
-
-PROFILE_QUESTION = """No profile on this machine. A profile is your own private repo of standards and settings, layered over the starters.
-  new   make one at {default}
-  URL   clone yours, made on another machine
-  DIR   use a directory where it is
-  none  use the starters, and stop asking"""
-
-
-def ask(question: str) -> str:
-  """One line typed at the terminal, stripped; empty when there is nothing to read."""
-  try: return input(question).strip()
-  except EOFError: return ""
-
-
-def pick() -> str:
-  """Ask which backend this machine has, showing each with whether it is here or how to install it, and record the answer; `""` when none is chosen."""
-  known = backends.load_backends()[0]
-  found = {name: backend.here() for name, backend in known.items()}
-  present = [name for name, (here, _) in found.items() if here]
-  done("", "Reviews run on a model. Which of these does this machine have?", *(f"  {name:<8} {known[name].spec.get('label', name):<22} {said}" for name, (_, said) in found.items()))
-  answer = ask(f"backend [{present[0] if present else 'none for now'}]: ") or (present[0] if present else "")
-  if answer not in known:
-    if answer: line(f"  skip  there is no backend called {answer}; `agent install --backend <name>` sets one later")
-    return ""
-  line(f"  set   default = {answer} in {install.home(backends.choose(answer))}")
-  return answer
-
-
-def settle(named: str | None) -> int:
-  """0 when a review has a backend: one named, the default, or one chosen now at a terminal; otherwise say how to set one and return 2."""
-  if named or backends.load_backends()[1]: return 0
-  if sys.stdin.isatty() and ask("No default backend is set, so a review has nowhere to run. Set one now? [Y/n] ").lower() in ("", "y", "yes") and pick(): return 0
-  return fail(backends.unset(), 2)
 
 
 @command("install", help="wire .agents into the agents on this machine")
@@ -68,9 +35,8 @@ def cmd_install(args) -> int:
     os.execve(kept, [kept, *sys.argv[1:]], os.environ | {"PATH": os.pathsep.join(entry for entry in os.environ.get("PATH", "").split(os.pathsep) if Path(entry).resolve() != (Path(sys.prefix) / "bin").resolve())})   # without uvx's own environment, which leads PATH
 
   answer = args.profile
-  if answer is None and profile.path() is None and profile.chosen() is None and sys.stdin.isatty() and gh.login():   # once, as every answer is recorded; a profile wants a private GitHub repo, so the question waits for gh
-    line(PROFILE_QUESTION.format(default=install.home(profile.DEFAULT)))
-    answer = ask("profile [new]: ") or "new"
+  if answer is None and profile.path() is None and profile.chosen() is None and CliHelpers.at_terminal() and gh.login():   # once, as every answer is recorded; a profile wants a private GitHub repo, so the question waits for gh
+    answer = CliHelpers.ask("No profile on this machine. A profile is your own private repo of standards and settings, layered over the starters.", {"new": f"make one at {install.home(profile.DEFAULT)}", "URL": "clone yours, made on another machine", "DIR": "use a directory where it is", "none": "use the starters, and stop asking"}, default="new", free=True)
 
   code, lines = install.run(args.targets, create=args.all, profile=answer)
   done(*lines)
@@ -78,14 +44,14 @@ def cmd_install(args) -> int:
 
   if answer == "new" and not git.run(profile.DEFAULT, "remote").stdout.strip():   # a profile reaches other machines only once pushed
     login = gh.login()
-    if login and sys.stdin.isatty() and ask(f"\nMake {login}/.agents.profile on GitHub, private, and push your profile there? [y/N] ").lower() in ("y", "yes"):   # it publishes, so it asks
+    if login and CliHelpers.ask(f"Make {login}/.agents.profile on GitHub, private, and push your profile there?", default=False):   # it publishes, so it asks
       made = gh.run("repo", "create", f"{login}/.agents.profile", "--private", "--source", str(profile.DEFAULT), "--remote", "origin", "--push")
       line(f"  made  {login}/.agents.profile, private, and pushed" if made.returncode == 0 else f"  FAIL  {(made.stderr.strip().splitlines() or ['gh said nothing'])[-1]}")
     if not git.run(profile.DEFAULT, "remote").stdout.strip():
       done("", "Push your profile somewhere private, so your other machines get it:", f"  git -C {profile.DEFAULT} remote add origin git@github.com:{login or '<you>'}/.agents.profile.git", f"  git -C {profile.DEFAULT} push -u origin main")
 
   if args.backend: done("", "backend", f"  set   default = {args.backend} in {install.home(backends.choose(args.backend))}")
-  elif not backends.load_backends()[1] and sys.stdin.isatty(): pick()
+  elif not backends.load_backends()[1]: CliHelpers.ask_backend()
 
   return done(*(["", "No profile chosen: `agent install --profile new|URL|DIR|none`, or run it at a terminal with gh logged in to be asked."] if profile.path() is None and profile.chosen() is None else []),
               *(["", f"No backend: {backends.unset().partition(': ')[2]}."] if not backends.load_backends()[1] else []),

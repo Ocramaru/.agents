@@ -6,6 +6,10 @@ kind: learned
 
 # Traps
 
+- **A default is not an answer.** `CliHelpers.ask` returns its default when nobody can be asked, so the profile question (default `new`) and the backend question (default the first one found) would have made a profile and recorded a backend in every unattended install. They check `CliHelpers.at_terminal()` first. The test that proves it has to make the question's other precondition true (gh logged in, a backend found): with it false the unattended run passes whether or not the guard exists.
+
+- **`NO_COLOR=1` does not make Rich plain.** It drops colour and keeps bold and dim, whose escape codes split `Answer (new):` into three pieces, so a pseudo-terminal test matching a phrase fails. `TERM=dumb` draws no codes at all; `typed()` sets both.
+
 - **A checkout's reviews belong to it, and only its dismissals travel.** Findings closed `--as wrong` in a worktree were unknown to `~/.agents`, whose next review of the same lines raised them again; the uv-install worktree alone held 54. A linked worktree writes `wrong` and `wontfix` closures to the main checkout's reviews as well, under the same id, and a review reads both. Open findings and `fixed` stay where they were made. A dismissal that never reached the main checkout's reviews, made before this or lost when the second write failed, is copied with `agent sub import <reviews> --root <main checkout>`.
 
 - **A hook that exits 0 when its CLI fails hides a command that no longer exists.** doc-check.sh called `agent run` after `run` moved under `agent sub`, and `|| exit 0` with nothing logged made every opted-in session end look like a clean check. A hook that cannot run its CLI logs an ERROR with the last line the CLI printed.

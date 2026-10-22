@@ -12,7 +12,7 @@ kind: context
 |---|---|
 | Assumptions | 22 |
 | How the parts fit | 33 |
-| Changing it | 49 |
+| Changing it | 50 |
 
 <!-- /map -->
 
@@ -41,6 +41,7 @@ The hub: standards, notes and review, linked into every agent from `~/.agents`.
 | `review.py` | routes each file to the agents whose standards govern it |
 | `reviews.py` | every review, kept in `<repo>/.agents/.reviews/`, gitignored, one per checkout; a linked worktree writes its `wrong` and `wontfix` closures to the main checkout's as well and reads dismissals from both, while open findings and `fixed` stay where they were made |
 | `config.toml` `[backends]` | where agents run; a role maps to a model. No `default` ships: the profile names one, and `backends.get` never falls back to the first |
+| `cli/utilities.py` | `CliHelpers.ask` is the only way the CLI asks (yes or no, a choice, text); it returns its default unasked unless stdin and stdout are both terminals, so a question whose default records something checks `CliHelpers.at_terminal()` first |
 | `githooks/` | `core.hooksPath`: the repo's own hook first, a review only where a note opts the repo in |
 | `hooks/gate.sh` | any hook: skip a call whose answer is known, stamped per session, invalidated by one named file |
 
