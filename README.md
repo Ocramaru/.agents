@@ -126,7 +126,7 @@ agent doctor
 env -u PYTHONPATH uv run pytest tests/
 ```
 
-`status` describes this machine on one screen and never fails: the version and whether it is a clone or an install, the profile and what it has not pushed, the default backend and the role each reviewer asks for, the standards and notes in force where you stand, the open findings there, and whether the hooks are wired.
+`status` describes this machine on one screen and never fails: the version and whether it is a clone or an install, the profile and what it has not pushed, the default backend and the role each reviewer asks for, the standards and notes in force where you stand, the open findings there, and whether the hooks are wired. At a terminal what wants a look is yellow and what is broken red; piped, it is plain text with the part named on every line.
 
 `doctor` judges, and covers what tests cannot: whether the hooks are registered here and an install's copies of them are current, whether `agent` on PATH is this install or clone, whether a standard points at one that was renamed, whether a backend's CLI is installed, whether a note's map has drifted, and whether your profile is pushed. The suite runs only against temporary trees, so it never touches your install or your profile.
 

@@ -76,6 +76,15 @@ def test_version_names_the_release_and_the_commit(project):
   assert agent(["--version"], cwd=project).stdout.strip() == f"agentkit {hub.version()}" and "(" in hub.version()
 
 
+def test_remap_if_note_skips_what_only_sits_where_a_note_would(project):
+  """The hub is itself a .agents, so its README sits where a note would; plain remap refuses it, and `--if-note` skips it and says so."""
+  (readme := project / ".agents" / "README.md").parent.mkdir(exist_ok=True)
+  readme.write_text("# R\n\n## A\n\nx\n\n## B\n\ny\n")
+  assert "is not a note" in agent(["remap", str(readme)], cwd=project, expect=1).stderr
+  assert agent(["remap", "--if-note", str(readme)], cwd=project).stdout == f"skipped  {readme.resolve()}, not a note\n"
+  assert "map:" not in readme.read_text()
+
+
 def test_bad_input_is_a_message_not_a_traceback_and_a_local_agentkit_never_shadows_the_real_one(project, tmp_path_factory):
   """Input the CLI cannot act on is reported without a traceback, in a repo or outside one, and an `agentkit/` in the cwd is never imported in its place."""
   outside = tmp_path_factory.mktemp("not-a-repo")

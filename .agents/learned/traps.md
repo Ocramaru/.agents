@@ -6,6 +6,8 @@ kind: learned
 
 # Traps
 
+- **The hub is itself a `.agents`, so a path glob for notes matches every `.md` in it.** notes-map's `*/.agents/*.md` sent `~/.agents/README.md` to `agent remap`, which refused it, and each edit logged an ERROR that `agent status` then reported. Only `notes.is_note` can tell; the hook passes `remap --if-note` and lets the CLI skip.
+
 - **A repo's own hooks are neither at `.git/hooks` nor where `--git-path hooks` says.** In a linked worktree `.git` is a file, so `agent hook install` failed with `NotADirectoryError`. `git rev-parse --git-path hooks/post-commit` follows `core.hooksPath`, which here names `~/.agents/githooks`, so `status` and `uninstall` would have looked there and a husky repo's hook would have been moved aside. Join `--git-common-dir` and `hooks/`, as `githooks/_dispatch` does.
 
 - **`git rev-parse HEAD` in a repo with no commits prints `HEAD` and fails.** `update` took it for the commit to count from, so pulling the first commits into an empty clone said "already current". `rev-parse --verify -q HEAD` prints nothing there.

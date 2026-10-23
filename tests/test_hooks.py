@@ -83,6 +83,15 @@ def test_the_guard_and_remap_hooks_log_the_reason_they_failed(environment, tmp_p
   assert ran.returncode == 0 and row[3:] == ["ERROR", "remap failed: KeyError: 'name'"]
 
 
+def test_the_remap_hook_asks_the_cli_to_skip_what_is_not_a_note(environment, tmp_path):
+  """The hub is itself a .agents, so every .md in it matches the hook's glob; the hook passes --if-note, and a file the CLI skips is logged as skipped, not as an ERROR."""
+  (readme := tmp_path / "hub" / ".agents" / "README.md").parent.mkdir(parents=True)
+  readme.write_text("# hub\n")
+  ran, row = fire(environment, "notes-map.sh", {"session_id": "s-4", "tool_input": {"file_path": str(readme)}}, stdout=f"skipped  {readme}, not a note\n")
+  assert ran.returncode == 0 and Path(environment["FAKE_CALLS"]).read_text() == f"remap --if-note {readme}\n"
+  assert row[3] == "skipped" and "ERROR" not in row
+
+
 def log(environment: dict, *arguments: str) -> None:
   """hook_log called from bash as a hook calls it."""
   subprocess.run(["bash", "-c", f'set -euo pipefail; . "{REPO}/hooks/log.sh"; hook_log "$@"', "hook_log", *arguments], check=True, env=environment)

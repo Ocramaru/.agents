@@ -65,10 +65,11 @@ def cmd_standards(args) -> int:
 
 @command("remap", help="refresh the section table at the top of each note")
 @arg("path", nargs="?", default=".", help="a note, or a directory to remap every note in, under or above (default: here)")
+@arg("--if-note", action="store_true", help="skip a file that is not a note rather than fail, as the hook does for every .md under a .agents/")
 def cmd_remap(args) -> int:
   path = Path(args.path).resolve()          # resolve first: Path(".").name is empty
   if not path.exists(): return fail(f"no such path: {args.path}")
-  if path.is_file() and not notes.is_note(path): return fail(f"{path.name} is not a note; only files in a .agents/ carry a map")
+  if path.is_file() and not notes.is_note(path): return done(f"skipped  {path}, not a note") if args.if_note else fail(f"{path.name} is not a note; only files in a .agents/ carry a map")
 
   targets = [path] if path.is_file() else tree.note_dirs_for(path)
   if not targets: return fail(f"no .agents in, under or above {path}")

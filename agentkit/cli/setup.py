@@ -3,11 +3,13 @@
 Author: Marco Cassar (@Ocramaru)
 """
 
+import re
+import sys
 from pathlib import Path
 
 from agentkit import backends, doctor, gh, git, hub, install, issue, profile, status
 from agentkit.command import arg, command
-from agentkit.cli.out import done, fail, line
+from agentkit.cli.out import done, escape, fail, line, say
 from agentkit.cli.utilities import CliHelpers
 
 
@@ -97,7 +99,14 @@ def cmd_issue(args) -> int:
 
 @command("status", help="what this machine has: the install, profile, backend, standards, notes, findings and hooks")
 def cmd_status(args) -> int:
-  return done(*(f"{part:<12}  {state}" for part, state in status.rows()))
+  """Each part and what it is, at a terminal with the part named once and coloured, its detail dimmed and its level in yellow or red; piped, plain with the part on every line, for grep."""
+  rows = status.rows()
+  width = max(len(part) for part, _, _ in rows)
+  for index, (part, text, level) in enumerate(rows):
+    label = "" if index and rows[index - 1][0] == part and sys.stdout.isatty() else part
+    detail = re.sub(r"\(([^()]*)\)", r"[dim](\1)[/dim]", escape(text))   # what is in parentheses says more, so it reads quieter
+    say(f"[bold cyan]{label:<{width}}[/bold cyan]  " + (f"[{colour}]{detail}[/{colour}]" if (colour := {"warn": "yellow", "fail": "red"}.get(level)) else detail))
+  return 0
 
 
 @command("doctor", help="check this machine's install and the standards graph")
