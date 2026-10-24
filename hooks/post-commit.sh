@@ -4,7 +4,6 @@
 # A commit must never wait on a model, so this returns immediately and the findings turn up in
 # `agent sub reviews --open` when they land. Installed per repo by `agent hook install`, which writes
 # a shim calling this, so updating the hub updates the logic everywhere.
-# Author: Marco Cassar (@Ocramaru)
 set -euo pipefail
 . "$HOME/.agents/hooks/log.sh"
 

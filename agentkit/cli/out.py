@@ -2,8 +2,6 @@
 
 `rich` is imported only to draw to a terminal, since the CLI loads on every hook call; piped or without
 it, the same text prints plain and a table tab-separated. One lock covers every write, so a line prints whole.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import json

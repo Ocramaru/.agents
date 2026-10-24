@@ -1,7 +1,4 @@
-"""The installer and the global git hooks, run against a throwaway HOME and a throwaway git config.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""The installer and the global git hooks, run against a throwaway HOME and a throwaway git config."""
 
 import json, os, shutil, signal, subprocess, sys, tomllib, uuid, zipfile
 from pathlib import Path

@@ -1,7 +1,5 @@
 """Where the hub's own files are, where this machine keeps its state, and which version of the hub this is.
 A clone is both, in one folder; an install bundles the files inside the package and keeps its state in ~/.agents.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import importlib.metadata

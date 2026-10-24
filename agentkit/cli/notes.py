@@ -1,7 +1,4 @@
-"""Commands for notes and standards: making a `.agents`, what governs a file, and keeping maps current.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""Commands for notes and standards: making a `.agents`, what governs a file, and keeping maps current."""
 
 import json
 import sys

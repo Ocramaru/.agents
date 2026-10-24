@@ -1,7 +1,4 @@
-"""Tests for the standards a file gets and the chain of notes it sits in: which are found, in what order, and how a note is mapped and split.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""Tests for the standards a file gets and the chain of notes it sits in: which are found, in what order, and how a note is mapped and split."""
 
 import os
 from pathlib import Path

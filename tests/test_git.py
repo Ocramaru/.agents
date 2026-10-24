@@ -1,8 +1,6 @@
 """git.last_line gives the reason a finished command failed, and git.pull moves a clone to its upstream or says why it cannot.
 
 The pulls run in real repositories in a temporary directory, with an identity and no hooksPath so no review runs.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import subprocess

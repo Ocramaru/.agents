@@ -1,7 +1,4 @@
-"""`.agents/.local/`: notes, standards and config for one machine, read right after their `.agents` and never committed.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""`.agents/.local/`: notes, standards and config for one machine, read right after their `.agents` and never committed."""
 
 import uuid
 from pathlib import Path

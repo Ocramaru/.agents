@@ -1,8 +1,6 @@
 """Where your own standards, reviewers, backends, config and AGENTS.md live, apart from the public hub's starters.
 A profile, usually a private repo cloned to `~/.agents/profile`, replaces a starter of the same name; a repo's standards still layer on top.
 Where it lives is this machine's, in the gitignored `local.toml`, which also takes any config.toml section for a machine with no profile.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import os

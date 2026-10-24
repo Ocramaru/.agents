@@ -1,8 +1,6 @@
 """What every command shares, as static methods on one class, so a call site reads `CliHelpers.ask(...)`.
 
 `rich` is imported inside the method that draws, since the CLI loads on every hook call and a hook never asks.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import sys

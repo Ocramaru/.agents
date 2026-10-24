@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Compaction can summarise away what inject.sh delivered while the stamps still claim it is in
 # context. Clearing them makes the next edit re-inject whatever that file needs.
-# Author: Marco Cassar (@Ocramaru)
 set -euo pipefail
 . "$HOME/.agents/hooks/log.sh"
 

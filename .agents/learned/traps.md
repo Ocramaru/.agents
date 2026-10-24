@@ -142,4 +142,4 @@ kind: learned
 
 - **Three designs for a section map all failed the same way.** Inside the note it referenced itself, beside it in `map.json` it drifted, rendered into it it did both; every fix existed to compensate for one note being monolithic. Splitting the note into files deleted all of it: the filename is the map.
 
-- **A standard nobody wrote down gets violated.** Four files arrived with 4-space indents and no `Author:` line while `python.md` was injected on every edit, because neither rule was in it. When a review finds a style miss, fix the standard before the code.
+- **A standard nobody wrote down gets violated.** Four files arrived with 4-space indents while `python.md` was injected on every edit, because the rule was not in it. When a review finds a style miss, fix the standard before the code.

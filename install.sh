@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Install .agents as a uv tool, then wire it into this machine's agents; arguments go to `agent install`.
 # AGENTS_SOURCE installs from elsewhere, such as a release: git+https://github.com/Ocramaru/.agents@v0.2.0
-# Author: Marco Cassar (@Ocramaru)
 set -euo pipefail
 
 requirement="${AGENTS_SOURCE:-git+https://github.com/Ocramaru/.agents}"

@@ -1,7 +1,4 @@
-"""Commands for subagents: running one, replying to it, fanning a review out over files, and reading what any of them said.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""Commands for subagents: running one, replying to it, fanning a review out over files, and reading what any of them said."""
 
 import hashlib
 import json

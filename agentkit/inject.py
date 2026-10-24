@@ -1,8 +1,6 @@
 """Everything a file needs in context (standards, notes and open findings), resolved in one pass.
 One pass is one interpreter start and one stamp directory for the whole answer.
 Standards layer along the `.agents` chain, and where two disagree the nearest wins.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import hashlib

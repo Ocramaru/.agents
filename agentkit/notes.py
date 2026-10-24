@@ -1,8 +1,6 @@
 """Note files, their tasks, and one-line summaries of the notes not sent, so an agent can choose which to open.
 A note that outgrows one file becomes a directory of parts, so the filename is the map; `mapblock` keeps a section table atop each note.
 Nothing is stored outside the notes themselves, so there is no second copy to drift.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import re

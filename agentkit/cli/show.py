@@ -2,8 +2,6 @@
 
 Kept apart from the commands because a run prints a result live and `agent sub reviews` prints it
 again later, and both print it the same way.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import re

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Standards and .agents notes for the file being edited, resolved in one call.
 # Everything with logic lives in agentkit; this moves bytes and counts the delimiters it writes for the one-line notice.
-# Author: Marco Cassar (@Ocramaru)
 set -euo pipefail
 . "$HOME/.agents/hooks/log.sh"
 

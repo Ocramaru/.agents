@@ -1,7 +1,4 @@
-"""What the formatter guard must catch, and what it must never catch: naming a formatter is not running one.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""What the formatter guard must catch, and what it must never catch: naming a formatter is not running one."""
 
 import pytest
 

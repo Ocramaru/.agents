@@ -1,7 +1,4 @@
-"""`agent`, the console script an install puts on PATH, and `python -m agentkit`, which is what bin/agent execs.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""`agent`, the console script an install puts on PATH, and `python -m agentkit`, which is what bin/agent execs."""
 
 import os
 import sys

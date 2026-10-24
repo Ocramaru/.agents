@@ -1,8 +1,6 @@
 """Which standards govern a file: match `applies` on the basename, then follow `extends` and `related`.
 Standards layer rather than replace: a repo's `.agents/standards/python.md` is sent after the bundled one, and wins where they disagree.
 A dot in a name is a namespace (`ml.runs` layers under `ml`) and a hyphen a compound word; `extends` names a base explicitly.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import fnmatch

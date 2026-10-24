@@ -1,7 +1,4 @@
-"""Markdown frontmatter. Standards, agent definitions and commands all use it.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""Markdown frontmatter. Standards, agent definitions and commands all use it."""
 
 from pathlib import Path
 

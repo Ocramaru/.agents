@@ -1,7 +1,4 @@
-"""The GitHub CLI, when it is installed: running it, who it is logged in as, and the repo a remote address names.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""The GitHub CLI, when it is installed: running it, who it is logged in as, and the repo a remote address names."""
 
 import functools
 import re

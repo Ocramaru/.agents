@@ -1,8 +1,6 @@
 """A profile holds your own standards, reviewers and config apart from the public .agents, which reads them.
 
 `local.toml`, the default profile path and git's global config are all pointed at temporary ones.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import argparse

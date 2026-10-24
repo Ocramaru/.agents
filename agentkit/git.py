@@ -1,7 +1,4 @@
-"""git, run in the hub's checkout, a profile, or any repo the hub reads, never raising: what it printed, why it failed, the latest pulled, the root of the repo a directory is in, and the main checkout of a linked worktree.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""git, run in the hub's checkout, a profile, or any repo the hub reads, never raising: what it printed, why it failed, the latest pulled, the root of the repo a directory is in, and the main checkout of a linked worktree."""
 
 import subprocess
 from pathlib import Path

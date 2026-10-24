@@ -6,7 +6,6 @@
 #
 # It never fails the hook it is logging. A log that cannot be written is not a reason to block an
 # edit, so every line here swallows its own errors.
-# Author: Marco Cassar (@Ocramaru)
 
 AGENTS_HOOK_LOG="${AGENTS_HOOK_LOG:-$HOME/.agents/.hooks.log}"
 

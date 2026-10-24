@@ -1,8 +1,6 @@
 """What every test file needs: the repo on the path, no profile, a git repo, a note in it, a standard.
 
 The path insert and the profile switch-off live here because pytest imports this before any test module, so the checkout is what every test imports.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import atexit, json, os, select, shutil, signal, subprocess, sys, tempfile, time

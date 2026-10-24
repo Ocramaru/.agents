@@ -1,7 +1,5 @@
 """Machine-readable description of the hub, and of the note directories under any tree, for indexers that are not this code.
 An indexer reads this rather than parsing frontmatter, so the format of a standard stays ours to change; INTEGRATION.md is the contract.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import re

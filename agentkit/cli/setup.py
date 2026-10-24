@@ -1,7 +1,4 @@
-"""Commands that set a machine up and keep it right: `install`, `update`, `issue` (report friction with the hub), `status` and `doctor`.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""Commands that set a machine up and keep it right: `install`, `update`, `issue` (report friction with the hub), `status` and `doctor`."""
 
 import re
 import sys

@@ -7,8 +7,6 @@
 # gate_skip <hook> <path> <session>         0 = the answer is known and empty, so skip
 # gate_mark <hook> <path> <session> [dep]   remember it, until `dep` is newer than now
 # gate_reviews <path>                       sets GATE_REVIEWS: the reviews db that could change it
-#
-# Author: Marco Cassar (@Ocramaru)
 
 _gate_stamp() {  # sets GATE_STAMP, a filename from the path without hashing it
   local flat="${2//_/_u}"   # _ becomes _u and / becomes _s, so two paths never share a stamp

@@ -1,8 +1,6 @@
 """The generated section table at the top of a note, pure text in and text out.
 The block's height depends only on the section count, so it is laid out at full size, then numbered against the finished text in one pass.
 Nothing is stored elsewhere: a note is stale exactly when `apply` would change it.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import re

@@ -1,7 +1,4 @@
-"""The layered config (the hub's `config.toml`, the profile's, this machine's `local.toml`, a repo's `.agents/agents.toml`) and writing one key of it.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""The layered config (the hub's `config.toml`, the profile's, this machine's `local.toml`, a repo's `.agents/agents.toml`) and writing one key of it."""
 
 import json
 import os

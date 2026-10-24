@@ -2,8 +2,6 @@
 
 A command is one decorated function, and `run()` is the only code that touches argparse, so
 adding one cannot half-happen.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import argparse

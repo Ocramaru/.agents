@@ -1,8 +1,6 @@
 """Fan an agent out over many files, one session each.
 
 One file per session keeps findings specific, costs one file per failure, and never needs the repo in one context window.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import fnmatch

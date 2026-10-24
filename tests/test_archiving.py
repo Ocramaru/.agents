@@ -1,7 +1,4 @@
-"""A finished task deleted out of `todo.md` instead of moved to `todo.archive.md` is reported, never blocked.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""A finished task deleted out of `todo.md` instead of moved to `todo.archive.md` is reported, never blocked."""
 
 import json
 import subprocess

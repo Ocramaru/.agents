@@ -1,7 +1,4 @@
-"""The gate remembers an empty `inject` answer per session and path, and never gates an answer that can still change.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""The gate remembers an empty `inject` answer per session and path, and never gates an answer that can still change."""
 
 import json, os, subprocess, uuid
 from pathlib import Path

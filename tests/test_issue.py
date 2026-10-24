@@ -1,7 +1,5 @@
 """Reporting friction with the hub from another repo: a draft that opens for the person to submit, carrying where it was met.
 No test runs `gh` or a browser; the calls are recorded and the assertions are about what was asked of them.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import argparse, json, platform, socket, subprocess, urllib.parse, webbrowser

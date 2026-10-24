@@ -1,7 +1,4 @@
-"""Tests for backends, a review conversation, which files a review reads, and which reviewer and standards it gets.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""Tests for backends, a review conversation, which files a review reads, and which reviewer and standards it gets."""
 
 import json
 import subprocess

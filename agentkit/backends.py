@@ -1,8 +1,6 @@
 """Running a prompt on a CLI or a local HTTP endpoint. Hosts are declared under [backends] in config.toml.
 
 A backend with `resume_argv` keeps its own context between turns; one without gets a replay.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import http.client

@@ -1,7 +1,4 @@
-"""Which notes an edit is charged for: split parts go to the files they name, a long note costs its map or a cut, each goes out once.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""Which notes an edit is charged for: split parts go to the files they name, a long note costs its map or a cut, each goes out once."""
 
 import uuid
 from pathlib import Path

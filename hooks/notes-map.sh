@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # PostToolUse: refresh a note's section table after it is edited. Idempotent and cheap, so it can
 # run on every note edit without checking whether anything moved.
-# Author: Marco Cassar (@Ocramaru)
 set -euo pipefail
 . "$HOME/.agents/hooks/log.sh"
 

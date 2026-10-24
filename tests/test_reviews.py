@@ -1,7 +1,4 @@
-"""Tests for the stored reviews, the messages the person reads, and a review run as it is watched.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""Tests for the stored reviews, the messages the person reads, and a review run as it is watched."""
 
 import subprocess, threading
 from contextlib import nullcontext

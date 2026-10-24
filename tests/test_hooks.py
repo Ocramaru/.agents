@@ -1,8 +1,6 @@
 """Each hook logs one row per firing, and a hook that could not do its job logs an ERROR saying why.
 
 The hooks run from this checkout against a fake `agent`, so what the CLI prints and how it exits is the test's to choose.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import json, os, subprocess, time

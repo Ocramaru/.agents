@@ -1,7 +1,5 @@
 """What must not run: the formatters `[guard]` names, where a layout is a decision and one sweep buries a small change.
 It parses the command rather than grepping it, since a regex cannot tell a formatter being run from one named in a quoted string.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import shlex

@@ -1,8 +1,6 @@
 """The chain of `.agents` directories above a file, and which of their notes are injected.
 The chain is found by walking up to the repo root and never stored, so a committed `.agents` works wherever it is cloned.
 By default only `context.md` (or a split one's index and the parts that apply) is injected and `learned.md` and `todo.md` are named, to read when needed; `inject` in agents.toml changes that.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import fnmatch

@@ -1,7 +1,5 @@
 """Check the install on this machine, which tests cannot see.
 Tests run against temporary trees, and an unregistered hook, a missing PATH entry or a renamed standard fails silently.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import importlib.util

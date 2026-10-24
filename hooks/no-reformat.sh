@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Refuse the formatters config.toml's [guard] names; `agent guard` parses the command, and this only moves bytes.
 # It fails open: when the guard cannot run, the command goes through and the log says so.
-# Author: Marco Cassar (@Ocramaru)
 set -euo pipefail
 . "$HOME/.agents/hooks/log.sh"
 

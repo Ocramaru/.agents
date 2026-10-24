@@ -1,7 +1,4 @@
-"""Agent definitions from agents/*.md, and the subject matter handed to them.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""Agent definitions from agents/*.md, and the subject matter handed to them."""
 
 import subprocess
 from pathlib import Path

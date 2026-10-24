@@ -1,7 +1,5 @@
 """The log of hook firings, one line each from `hooks/log.sh`, read back and written from Python.
 A hook that injected unseen context, one that sent nothing and one that crashed look alike, so the log is the record.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import importlib.metadata

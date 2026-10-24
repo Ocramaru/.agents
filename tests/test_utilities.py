@@ -1,7 +1,4 @@
-"""`CliHelpers.ask` run through a real pseudo-terminal, since whether it asks and what it draws depend on there being one, then the commands that lean on it: `install --changes`, `update` and a review with no backend.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""`CliHelpers.ask` run through a real pseudo-terminal, since whether it asks and what it draws depend on there being one, then the commands that lean on it: `install --changes`, `update` and a review with no backend."""
 
 import ast, os, re, shlex, sys, tomllib
 from pathlib import Path

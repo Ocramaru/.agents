@@ -1,7 +1,5 @@
 """`agent status`, which describes this machine and never fails, run as a subprocess from a checkout and as installed.
 The backend and a missing duckdb are read in-process, where the profile's config and the import can be pinned.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import json, sys

@@ -1,7 +1,4 @@
-"""The CLI run as a subprocess from the positions someone stands in; the failed-review display runs in-process.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""The CLI run as a subprocess from the positions someone stands in; the failed-review display runs in-process."""
 
 import contextlib, io, json, uuid
 

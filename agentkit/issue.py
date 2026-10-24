@@ -1,8 +1,6 @@
 """Friction with the hub, drafted as an issue on it from any repo, since another repo's notes are never read here.
 A draft carries the .agents commit and platform; the repo and hostname only with `--context`, as issues are public.
 Nothing is filed: the draft opens as a prefilled GitHub page for the person to read, edit and submit.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import importlib.metadata

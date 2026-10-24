@@ -1,7 +1,5 @@
 """What this machine has, on one read-only screen: the install, the profile, the backend, what is in force here, and the hooks.
 `doctor` judges and this describes, so a broken part is described where doctor would fail it, and the screen always draws.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import json

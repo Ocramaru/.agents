@@ -1,8 +1,6 @@
 """Review conversations, in an append-only DuckDB file under the repo they are about; a reply is a new row.
 Keys are uuid7, so `id > last_seen` is the sync cursor and rows from two machines never conflict.
 DuckDB is imported where it is used, so `agent inject`, `agent standards` and the hooks run with nothing installed.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import fnmatch

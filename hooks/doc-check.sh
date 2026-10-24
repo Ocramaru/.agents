@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Stop hook: run doc-check over the working diff when a session ends.
 # Opt in with AGENTS_DOC_CHECK=1. Advisory only -- it reports and lets the session end.
-# Author: Marco Cassar (@Ocramaru)
 set -euo pipefail
 . "$HOME/.agents/hooks/log.sh"
 

@@ -1,7 +1,4 @@
-"""Commands for hooks: the post-commit review in a repo or everywhere, what the hooks have done, and the formatter guard.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""Commands for hooks: the post-commit review in a repo or everywhere, what the hooks have done, and the formatter guard."""
 
 from pathlib import Path
 

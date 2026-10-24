@@ -1,8 +1,6 @@
 """Wire .agents into the coding agents on this machine, and git into every repo that opts in.
 A clone is linked, so `git pull` updates a machine without a reinstall; an install copies what agents name by path into ~/.agents, since a link into the tool's venv dangles when its Python changes.
 Anything in place that is not ours is moved aside rather than overwritten, and a second run changes nothing.
-
-Author: Marco Cassar (@Ocramaru)
 """
 
 import json

@@ -1,7 +1,4 @@
-"""Commands for your profile: where it is, making a new one, and switching to another.
-
-Author: Marco Cassar (@Ocramaru)
-"""
+"""Commands for your profile: where it is, making a new one, and switching to another."""
 
 from pathlib import Path
 
