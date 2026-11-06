@@ -67,4 +67,4 @@ def test_the_warning_arrives_every_time_and_the_person_sees_it(todo, tmp_path_fa
   assert "removes 1 task" in again.stdout and "--- agent-notes" not in again.stdout   # said again, while the standards stay deduped
 
   output = json.loads(subprocess.run(["bash", str(REPO / "hooks" / "inject.sh")], input=json.dumps({"session_id": f"archive-{uuid.uuid4().hex}", "tool_name": "Edit", "tool_input": tool_input}), capture_output=True, check=True, text=True, cwd=todo.parent.parent, env=checkout_home(tmp_path_factory.mktemp("hub"))).stdout)
-  assert "a task leaving todo.md unarchived" in output["systemMessage"] and "removes 1 task" in output["hookSpecificOutput"]["additionalContext"]
+  assert "1 task leaving todo.md unarchived" in output["systemMessage"] and "removes 1 task" in output["hookSpecificOutput"]["additionalContext"]

@@ -1,11 +1,15 @@
 """The CLI run as a subprocess from the positions someone stands in; the failed-review display runs in-process."""
 
-import contextlib, io, json, uuid
+import contextlib
+import io
+import json
+import os
+import uuid
 
 import pytest
-from conftest import agent, git, note
+from conftest import agent, git, note, put
 
-from agentkit import agents, cli, hub, review
+from agentkit import agents, cli, doctor, hub, review, standards
 
 
 @pytest.fixture
@@ -82,6 +86,33 @@ def test_remap_if_note_skips_what_only_sits_where_a_note_would(project):
   assert "map:" not in readme.read_text()
 
 
+def test_remap_writes_the_standards_table_from_each_description_and_doctor_fails_a_stale_one(tmp_path, monkeypatch):
+  """A profile's AGENTS.md table is a row per standard in name order, a family's members under it; remap rebuilds it from the AGENTS.md, a standard it lists or its folder, and doctor fails it until then."""
+  where = tmp_path / "profile"
+  for file, name, description in (("zeta.md", "zeta", "last"), ("latex/latex.md", "latex", "the family"), ("latex/stats.md", "latex.stats", "a | member"), ("latex-x.md", "latex-x", "after the family")):
+    put(where / "standards", file, text=f"---\nname: {name}\ndescription: {description}\n---\n\nx\n")
+  (agents_md := where / "AGENTS.md").write_text("# Mine\n\n<!-- standards -->\n<!-- /standards -->\n\nafter\n")
+  environment, current = {"AGENTS_PROFILE": str(where)}, lambda: [passed for passed, label, _ in doctor.checks() if label == f"standards table current in {agents_md.resolve()}"]
+  monkeypatch.setenv("AGENTS_PROFILE", str(where))
+  monkeypatch.chdir(tmp_path)
+  assert current() == [False]
+
+  assert agent(["remap", str(agents_md)], cwd=tmp_path, env=environment).stdout == f"remapped {agents_md.resolve()}\n"
+  text = agents_md.read_text()
+  assert text.startswith(f"# Mine\n\n{standards.TABLE_START}\n\n| | |\n|---|---|\n") and text.endswith(f"\n\n{standards.TABLE_END}\n\nafter\n")
+  assert [line for line in text.splitlines() if line.startswith("| [")] == ["| [`latex`](standards/latex/latex.md) | the family |", "| [`latex.stats`](standards/latex/stats.md) | a \\| member |",
+                                                                           "| [`latex-x`](standards/latex-x.md) | after the family |", "| [`zeta`](standards/zeta.md) | last |"]
+  assert current() == [True] and agent(["remap", str(agents_md)], cwd=tmp_path, env=environment).stdout == f"current  {agents_md.resolve()}\n"
+
+  for target, cwd in ((where / "standards" / "latex" / "stats.md", tmp_path), (".", where / "standards")):   # a standard it lists, then a folder inside its own
+    put(where / "standards", "zeta.md", text=f"---\nname: zeta\ndescription: {target}\n---\n\nx\n")
+    assert current() == [False]
+    assert f"remapped {agents_md.resolve()}" in agent(["remap", "--if-note", str(target)], cwd=cwd, env=environment).stdout
+    assert f"| [`zeta`](standards/zeta.md) | {target} |" in agents_md.read_text() and current() == [True]
+  (readme := where / "README.md").write_text("# R\n")
+  assert agent(["remap", "--if-note", str(readme)], cwd=tmp_path, env=environment).stdout == f"skipped  {readme.resolve()}, not a note\n"   # beside the table, but neither a note nor a standard
+
+
 def test_bad_input_is_a_message_not_a_traceback_and_a_local_agentkit_never_shadows_the_real_one(project, tmp_path_factory):
   """Input the CLI cannot act on is reported without a traceback, in a repo or outside one, and an `agentkit/` in the cwd is never imported in its place."""
   outside = tmp_path_factory.mktemp("not-a-repo")
@@ -107,8 +138,19 @@ def test_bad_input_is_a_message_not_a_traceback_and_a_local_agentkit_never_shado
 
   (project / "claude").mkdir()
   (project / "claude" / "settings.json").write_text('{"hooks": {},}')
-  doctor = agent(["doctor"], cwd=project, expect=None, env={"CLAUDE_CONFIG_DIR": str(project / "claude")})
-  assert "Traceback" not in doctor.stderr and "not valid JSON" in doctor.stdout
+  ran = agent(["doctor"], cwd=project, expect=None, env={"CLAUDE_CONFIG_DIR": str(project / "claude")})
+  assert "Traceback" not in ran.stderr and "not valid JSON" in ran.stdout
+  if os.geteuid() != 0:   # root reads it anyway
+    (project / "claude" / "settings.json").chmod(0)
+    ran = agent(["doctor"], cwd=project, expect=1, env={"CLAUDE_CONFIG_DIR": str(project / "claude")})
+    assert "Traceback" not in ran.stderr and "FAIL  the hub's hooks in Claude Code's settings.json" in ran.stdout and "-> cannot be read: [Errno 13] Permission denied" in ran.stdout
+    (project / "claude" / "settings.json").chmod(0o644)
+
+    (unreadable := project / ".agents" / "todo.md").write_text("---\nname: todo\nkind: todo\n---\n\nx\n")
+    unreadable.chmod(0)
+    ran = agent(["doctor"], cwd=project, expect=1)
+    assert "Traceback" not in ran.stderr and f"FAIL  map current in {project.name}/.agents/todo.md" in ran.stdout and "-> cannot be read: [Errno 13] Permission denied" in ran.stdout
+    unreadable.chmod(0o644)
 
   assert "the note to split" in agent(["split"], cwd=project, expect=2).stderr   # no arguments: the whole help
   assert "positional arguments" not in agent(["sub", "close", "x", "--as", "nope"], cwd=project, expect=2).stderr   # a bad value: usage only

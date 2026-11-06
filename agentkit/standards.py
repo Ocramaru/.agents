@@ -1,16 +1,47 @@
-"""Which standards govern a file: match `applies` on the basename, then follow `extends` and `related`.
+"""Which standards govern a file: match `applies` on the basename, then follow `extends`, `related` and a dotted name's families (`ml.runs` layers under `ml`; a hyphen is only a compound word).
 Standards layer rather than replace: a repo's `.agents/standards/python.md` is sent after the bundled one, and wins where they disagree.
-A dot in a name is a namespace (`ml.runs` layers under `ml`) and a hyphen a compound word; `extends` names a base explicitly.
+The table of standards in the hub's AGENTS.md and the profile's is generated here from each one's `description`, so the frontmatter is the one copy.
 """
 
 import fnmatch
 import functools
+import re
 from pathlib import Path
 
 from agentkit import hub, mapblock, profile as _profile
 from agentkit.frontmatter import Doc, load
 
 AUTO = object()   # the profile goes with the bundled set, and with nothing else
+# the standards table in an AGENTS.md, generated from each standard's description as mapblock generates a note's map
+TABLE_START = "<!-- standards: generated from each standard's description. Edit the description, not this; after a manual edit run `agent remap` here -->"
+TABLE_END = "<!-- /standards -->"
+TABLE = re.compile(r"<!-- standards\b[^>]*-->.*?" + re.escape(TABLE_END), re.DOTALL)   # any `<!-- standards` marker, so an older one is replaced
+
+
+def bases(document: Doc) -> list[str]:
+  """The standards one layers on, by name alone: each enclosing family of a dotted name, `a.b.c` -> `a`, `a.b`, then any `extends`."""
+  bits = document.name.split(".")
+  return [".".join(bits[:length]) for length in range(1, len(bits))] + document.list("extends")
+
+
+def files(directory: Path) -> list[Path]:
+  """The standards in a directory, a family's folder included: `latex/robotics.md` holds `latex.robotics` beside `latex/latex.md`. A hidden folder is skipped.
+  Layout only: a folder carries no meaning, the name in each file's frontmatter does."""
+  return sorted(file for file in Path(directory).rglob("*.md") if not any(part.startswith(".") for part in file.relative_to(directory).parts))
+
+
+def tables() -> dict[Path, Path]:
+  """Each AGENTS.md holding a generated standards table, with the directory it lists: the hub's, of the starters, and the profile's, of its own."""
+  pairs = [(hub.BUNDLED / "AGENTS.md", hub.STANDARDS), (_profile.file("AGENTS.md"), _profile.file("standards"))]
+  return {agents_md.resolve(): directory.resolve() for agents_md, directory in pairs
+          if agents_md and directory and agents_md.is_file() and directory.is_dir() and TABLE.search(agents_md.read_text(encoding="utf-8"))}
+
+
+def table(agents_md: Path, directory: Path) -> str:
+  """The text of `agents_md` with its standards table rebuilt, a row for each standard in `directory` in name order, a family's members under it."""
+  documents = sorted((load(file) for file in files(directory)), key=lambda document: document.name.split("."))   # by part, so `latex.stats` follows `latex` and not `latex-x`
+  rows = [f"| [`{document.name}`]({document.path.relative_to(agents_md.parent).as_posix()}) | {document.get('description').replace('|', '\\|')} |" for document in documents]
+  return TABLE.sub(lambda _: "\n".join([TABLE_START, "", "| | |", "|---|---|", *rows, "", TABLE_END]), agents_md.read_text(encoding="utf-8"), count=1)
 
 
 def sections(lines: list[str]) -> list[tuple[str, int, int]]:
@@ -74,11 +105,11 @@ class Library:
   def layers(self) -> dict[str, list[Layer]]:
     """Each standard's layers, in the order they apply."""
     out: dict[str, list[Layer]] = {}
-    mine = {load(file).name for file in self.profile.glob("*.md")} if self.profile and self.profile.is_dir() else set()
+    mine = {load(file).name for file in files(self.profile)} if self.profile and self.profile.is_dir() else set()
 
     for directory, origin in [(self.root, "bundled"), (self.profile, "profile")] + [(directory, "repo") for directory in self.overrides]:
       if not (directory and Path(directory).is_dir()): continue
-      for file in sorted(Path(directory).glob("*.md")):
+      for file in files(directory):
         document = load(file)
         if origin == "bundled" and document.name in mine: continue   # a profile standard replaces the starter of its name
         out.setdefault(document.name, []).append(Layer(document, origin))
@@ -106,8 +137,7 @@ class Library:
       document = self.docs[name]
 
       # every base arrives first, recursively, and a dotted name implies its enclosing standards: a.b.c -> [a, a.b]
-      bits = name.split(".")
-      for base in [".".join(bits[:length]) for length in range(1, len(bits))] + document.list("extends"): add(base)
+      for base in bases(document): add(base)
       out.extend(self.layers[name])
       queue.extend(document.list("related"))
 

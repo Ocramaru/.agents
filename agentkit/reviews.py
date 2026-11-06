@@ -6,7 +6,6 @@ DuckDB is imported where it is used, so `agent inject`, `agent standards` and th
 import fnmatch
 import getpass
 import json
-import os
 import queue
 import re
 import socket
@@ -46,16 +45,7 @@ alter table reviews add column if not exists digest text;
 # closing verdicts: `wrong` and `wontfix` go to the next reviewer so it does not raise them; `fixed` is a claim it checks
 VERDICTS = ("fixed", "wrong", "wontfix")
 KEEP_QUIET = ("wrong", "wontfix")
-
-
-def uuid7() -> uuid.UUID:
-  """An RFC 9562 v7 UUID: 48 bits of millisecond, then randomness.
-  `uuid.uuid7` exists only from Python 3.14."""
-  raw = bytearray(os.urandom(16))
-  raw[0:6] = (int(time.time() * 1000) & 0xFFFFFFFFFFFF).to_bytes(6, "big")
-  raw[6] = (raw[6] & 0x0F) | 0x70   # version
-  raw[8] = (raw[8] & 0x3F) | 0x80   # variant
-  return uuid.UUID(bytes=bytes(raw))
+TRIES = 12   # how often a connection asks for a lock another process holds, about 33 s of backoff in all
 
 
 def author() -> str:
@@ -67,7 +57,7 @@ def author() -> str:
 
 def path(root: Path, create: bool = True) -> Path:
   """The database under the repo's outermost `.agents`. A repo's reviews belong to that repo."""
-  directory = (git.root(root) or Path(root)) / ".agents" / DIR
+  directory = (git.root(root) or Path(root)) / hub.AGENTS_DIR / DIR
 
   if create:
     directory.mkdir(parents=True, exist_ok=True)
@@ -104,7 +94,7 @@ def record(session: Session, agent: str, backend: str, root: Path, file: str, me
            role: str, run: str | None = None, digest: str | None = None) -> dict:
   """One conversation as a row, flat enough to read and complete enough to resume.
   `role` is stored in the `tier` column because a reply continues on the model the review was done with."""
-  return {"id": str(uuid7()), "task": session.task, "at": time.time(), "author": author(), "agent": agent,
+  return {"id": str(uuid.uuid7()), "task": session.task, "at": time.time(), "author": author(), "agent": agent,
           "backend": backend, "role": role, "root": str(root), "file": file, "state": message.state,
           "kind": message.kind, "body": message.body, "findings": findings, "max_turns": session.max_turns,
           "handles": session.handles, "messages": [turn.__dict__.copy() for turn in session.messages], "run": run, "digest": digest}
@@ -129,7 +119,7 @@ def _insert(connection, record: dict) -> None:
 
     if record["findings"]:
       connection.executemany("""insert into findings (id, review_id, task, author, file, line, issue, failure, fix, "at", closed_by) values (?,?,?,?,?,?,?,?,?,?,?)""",
-                             [[str(uuid7()), record["id"], record["task"], record["author"], finding.get("file", record["file"]),
+                             [[str(uuid.uuid7()), record["id"], record["task"], record["author"], finding.get("file", record["file"]),
                                str(finding.get("line", "")), finding.get("issue", ""), finding.get("failure", ""), finding.get("fix", ""),
                                record["at"], None] for finding in record["findings"]])
     connection.commit()
@@ -150,7 +140,7 @@ def writer(root: Path):
     if not pending: return
     connection = None
     try:
-      connection = connect(root, tries=12)
+      connection = connect(root, tries=TRIES)
       for record in pending:
         try: _insert(connection, record)
         except Exception as error: failures.append(error)  # noqa: BLE001 -- one record failing must not lose the rest of the queue
@@ -185,9 +175,9 @@ def write(record: dict, root: Path) -> str:
 
 
 @contextmanager
-def _reading(root: Path):
+def _reading(root: Path, tries: int = 1):
   """One read-only connection for a whole operation, closed after; None when there are no reviews yet."""
-  connection = connect(root, read_only=True)
+  connection = connect(root, read_only=True, tries=tries)
   try: yield connection
   finally:
     if connection is not None: connection.close()
@@ -214,7 +204,7 @@ def query(root: Path, sql: str, parameters: list | None = None) -> list[dict]:
 def conversations(root: Path, limit: int = 0, task: str | None = None) -> list[dict]:
   """Conversations oldest first, each with the findings it recorded; the newest `limit`, of one `task` if given."""
   where, parameters = ("where task = ? ", [task]) if task else ("", [])
-  newest = f"select * from reviews {where}order by id desc{f' limit {int(limit)}' if limit else ''}"
+  newest = f"select * from reviews {where}order by id desc" + (f" limit {int(limit)}" if limit else "")
 
   with _reading(root) as connection:
     if connection is None: return []
@@ -230,7 +220,7 @@ def conversations(root: Path, limit: int = 0, task: str | None = None) -> list[d
 def verdicts(root: Path) -> dict[str, dict]:
   """Each task's latest verdict with a digest and its open findings, checked before asking a model again.
   Read before a writer opens, since duckdb will not hold both connections in one process."""
-  with _reading(root) as connection:
+  with _reading(root, TRIES) as connection:   # waited for as a write is, since a lock read as no verdicts asks every file again
     if connection is None or not _has(connection, "reviews", "digest"): return {}
 
     out = {row["task"]: {**row, "findings": []} for row in _select(connection, f"""select task, digest, run, body from reviews r
@@ -277,7 +267,7 @@ def _has(connection, table: str, column: str | None = None) -> bool:
 
 
 # only a verdict replaces a verdict: a question or a failed recheck leaves the open findings open
-SUPERSEDES = "(r2.kind = 'findings' or exists (select 1 from findings f2 where f2.review_id = r2.id))"
+SUPERSEDES = "(r2.state <> 'failed' and (r2.kind = 'findings' or exists (select 1 from findings f2 where f2.review_id = r2.id)))"
 
 
 def open_findings(root: Path) -> list[dict]:
@@ -291,7 +281,7 @@ def _open(connection, root: Path) -> list[dict]:
   base = (git.root(root) or Path(root)).resolve()
   closed = "and f.id not in (select finding_id from closures)" if _has(connection, "closures") else ""
   rows = _select(connection, f"""
-    select f.id, f.file, f.line, f.issue, f.fix, f.task, r.agent, r.at{", r.run" if _has(connection, "reviews", "run") else ""}
+    select f.id, f.file, f.line, f.issue, f.fix, f.task, r.agent, r.at, r.file as reviewed{", r.run" if _has(connection, "reviews", "run") else ""}
     from findings f join reviews r on r.id = f.review_id
     where f.closed_by is null {closed}
       and r.id = (select max(id) from reviews r2 where r2.task = r.task and {SUPERSEDES})""")
@@ -303,7 +293,8 @@ def _open(connection, root: Path) -> list[dict]:
       try: row["file"] = stored.resolve().relative_to(base).as_posix()
       except ValueError: pass
 
-  return sorted([row for row in rows if (base / row["file"]).exists()], key=lambda row: (row["file"], first_line(row["line"])))   # nothing reviews a deleted file again
+  # a review of one file goes with its file; one over several is replaced whole by its next verdict, and a finding of it may carry a name the model gave that is no path
+  return sorted([row for row in rows if not row.pop("reviewed") or (base / row["file"]).exists()], key=lambda row: (row["file"], first_line(row["line"])))   # nothing reviews a deleted file again
 
 
 def short_id(finding_id: str) -> str:
@@ -315,12 +306,13 @@ def to_recheck(root: Path) -> dict[str, list[str]]:
   """Files to ask about again, by agent: any with an open finding, or one closed as fixed after its last verdict.
   A `fixed` closure is a claim no reviewer has checked yet."""
   out: dict[str, set] = {}
+  base = git.root(root) or Path(root)
   with _reading(root) as connection:
     if connection is None: return {}
-    for finding in _open(connection, root): out.setdefault(finding["agent"], set()).add(finding["file"])
+    for finding in _open(connection, root):
+      if (base / finding["file"]).exists(): out.setdefault(finding["agent"], set()).add(finding["file"])   # a name a review of several files gave is open but has nothing to send
 
     if _has(connection, "closures"):
-      base = git.root(root) or Path(root)
       for row in _select(connection, f"""select distinct c.file, (select agent from reviews r where r.task = c.task limit 1) as agent
                                from closures c where c.verdict = 'fixed'
                                  and c."at" > (select max("at") from reviews r2 where r2.task = c.task and {SUPERSEDES})"""):
@@ -362,9 +354,10 @@ def close(root: Path, file: str, line: int, verdict: str, reason: str = "") -> l
           finding["file"] == file and (not line or first_line(finding["line"]) == line))]
 
   who, now = author(), time.time()
-  closures = [{"id": str(uuid7()), "finding_id": finding["id"], "task": finding["task"], "file": finding["file"], "line": finding["line"], "issue": finding["issue"], "author": who, "at": now, "verdict": verdict, "reason": reason} for finding in hits]
+  closures = [{"id": str(uuid.uuid7()), "finding_id": finding["id"], "task": finding["task"], "file": finding["file"], "line": finding["line"], "issue": finding["issue"], "author": who, "at": now, "verdict": verdict, "reason": reason} for finding in hits]
   # a dismissal judges code that lands unchanged, so a worktree's main checkout keeps it too, under the same id; a fix lands with its code
-  for checkout in ([root, main] if verdict in KEEP_QUIET and closures and (main := git.main_checkout(root)) else [root]):
+  # the main checkout's first: when its write fails nothing is closed, so closing again writes both
+  for checkout in ([main, root] if verdict in KEEP_QUIET and closures and (main := git.main_checkout(root)) else [root]):
     with writer(checkout) as put:
       for closure in closures: put({"closure": closure})
   return hits
@@ -375,7 +368,7 @@ def dismissals(root: Path) -> dict[str, list[dict]]:
   A linked worktree reads its main checkout's as well, where every worktree's dismissals also land."""
   found: dict[str, dict] = {}
   for checkout in filter(None, (root, git.main_checkout(root))):
-    with _reading(checkout) as connection:
+    with _reading(checkout, TRIES) as connection:   # waited for as a write is, since a lock read as no dismissals raises them all again
       if connection is None or not _has(connection, "closures"): continue
       # by id, since a dismissal made in a worktree is in both checkouts' reviews
       found |= {row["id"]: row for row in _select(connection, f"""select id, file, line, issue, verdict, reason, author from closures where verdict in ({", ".join("?" * len(KEEP_QUIET))})""", list(KEEP_QUIET))}

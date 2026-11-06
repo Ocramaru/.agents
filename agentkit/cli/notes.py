@@ -5,9 +5,12 @@ import sys
 import uuid
 from pathlib import Path
 
-from agentkit import inject, manifest, notes, tree
+from agentkit import inject, manifest, notes, standards, tree
 from agentkit.command import arg, command
 from agentkit.cli.out import done, dump, escape, fail, line, table
+
+# what `agent inject` exits with, the one place they are defined: hooks/inject.sh and hooks/session-start.sh compare against these numbers, and tests/test_hooks.py holds them to it
+SENT, ALREADY_SENT, NOTHING_GOVERNS = 0, 1, 3
 
 
 @command("init", help="create a .agents here")
@@ -30,11 +33,13 @@ def cmd_context(args) -> int:
 @arg("file", help="the file about to be edited")
 @arg("--session", default=None, help="dedupe against this session; without one, show everything and stamp nothing")
 @arg("--edit", action="store_true", help="read the hook payload on stdin, to notice what an edit removes")
+@arg("--start", action="store_true", help="FILE is the directory a session starts in: its notes, from the repo root down, and no standards")
+@arg("--depends", action="store_true", help="when there is nothing to send, print the paths whose change could change that, one per line, for the hook's gate")
 def cmd_inject(args) -> int:
-  """Exit 0 when it printed something, 1 when everything governing the file was already sent, 3 when nothing does."""
+  """Exit SENT when it printed something, ALREADY_SENT when everything governing the file was already sent, NOTHING_GOVERNS when nothing does."""
   path = Path(args.file)
   # a fresh session each run by hand, so nothing one run stamps hides the next
-  text, keys, governed = inject.payload(path, args.session or f"look-{uuid.uuid4().hex}")
+  text, keys, governed = (inject.start if args.start else inject.payload)(path, args.session or f"look-{uuid.uuid4().hex}")
 
   warn = ""
   if args.edit:
@@ -45,10 +50,12 @@ def cmd_inject(args) -> int:
     warn = notes.abandoned(path, tool.get("old_string") or "", tool.get("new_string") or "")
 
   sent = "\n\n".join(filter(None, (text, warn)))
-  if not sent: return 1 if governed else 3
+  if not sent:
+    if args.depends: line("\n".join(str(watched) for watched in inject.depends(path)))
+    return ALREADY_SENT if governed else NOTHING_GOVERNS
   line(sent)
   if args.session: inject.mark(args.session, keys)   # after it is out, and never for the warning
-  return 0
+  return SENT
 
 
 @command("standards", help="which standards govern a file")
@@ -60,17 +67,25 @@ def cmd_standards(args) -> int:
   return table(["standard", "from", "what"], [[escape(layer.doc.name), escape(layer.origin), escape(layer.doc.get("description") or "")] for layer in layers], wide=("what",))
 
 
-@command("remap", help="refresh the section table at the top of each note")
-@arg("path", nargs="?", default=".", help="a note, or a directory to remap every note in, under or above (default: here)")
-@arg("--if-note", action="store_true", help="skip a file that is not a note rather than fail, as the hook does for every .md under a .agents/")
+@command("remap", help="refresh the section table at the top of each note, and the standards table in the hub's AGENTS.md and the profile's")
+@arg("path", nargs="?", default=".", help="a note, an AGENTS.md or a standard it lists, or a directory to remap every note in, under or above (default: here)")
+@arg("--if-note", action="store_true", help="skip a file that is neither a note nor behind a standards table rather than fail, as the hook does for every .md under a .agents/")
 def cmd_remap(args) -> int:
   path = Path(args.path).resolve()          # resolve first: Path(".").name is empty
   if not path.exists(): return fail(f"no such path: {args.path}")
-  if path.is_file() and not notes.is_note(path): return done(f"skipped  {path}, not a note") if args.if_note else fail(f"{path.name} is not a note; only files in a .agents/ carry a map")
+  # a standards table is rebuilt from its AGENTS.md, a standard it lists, or a directory it sits in, under or above
+  tables = standards.tables()
+  rebuilt = [agents_md for agents_md, directory in tables.items()
+             if (path == agents_md or path in standards.files(directory) if path.is_file() else agents_md.is_relative_to(path) or path.is_relative_to(agents_md.parent))]
+  if path.is_file() and not notes.is_note(path) and not rebuilt: return done(f"skipped  {path}, not a note") if args.if_note else fail(f"{path.name} is not a note; only files in a .agents/ carry a map")
 
-  targets = [path] if path.is_file() else tree.note_dirs_for(path)
-  if not targets: return fail(f"no .agents in, under or above {path}")
-  return done(*(("remapped " if notes.remap(target) else "current  ") + str(target) for target in targets))
+  targets = ([path] if notes.is_note(path) else []) if path.is_file() else tree.note_dirs_for(path)
+  if not targets and not rebuilt: return fail(f"no .agents in, under or above {path}")
+  lines = [("remapped " if notes.remap(target) else "current  ") + str(target) for target in targets]
+  for agents_md in rebuilt:
+    if changed := (text := standards.table(agents_md, tables[agents_md])) != agents_md.read_text(encoding="utf-8"): agents_md.write_text(text, encoding="utf-8")
+    lines.append(("remapped " if changed else "current  ") + str(agents_md))
+  return done(*lines)
 
 
 @command("split", help="break a note into a directory, one file per section")

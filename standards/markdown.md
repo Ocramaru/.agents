@@ -1,6 +1,6 @@
 ---
 name: markdown
-description: How markdown is written here
+description: How markdown is written here, never hand-formatted: no hard-wrapped paragraphs, no space padding, tabular data in a table
 applies: *.md, *.mdx, *.markdown
 related: commits
 ---

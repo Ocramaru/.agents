@@ -11,6 +11,7 @@ END = "<!-- /map -->"
 # any `<!-- map` marker matches, so a block with an older marker is replaced rather than doubled
 BLOCK = re.compile(r"\n*<!-- map\b[^>]*-->.*?" + re.escape(END) + r"\n*", re.DOTALL)
 HEADING = re.compile(r"^#{2,3}\s+(.+?)\s*$")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")   # a code fence, which only a run of the same character at least as long closes
 MIN_SECTIONS = 2   # one section is not a table of contents
 
 
@@ -21,10 +22,13 @@ def strip(text: str) -> str:
 
 def headings(lines: list[str]) -> list[tuple[str, int]]:
   """Headings and their line numbers, ignoring anything inside a fenced block."""
-  out, fenced = [], False
+  out, fence = [], ""
   for line_number, line in enumerate(lines, 1):
-    if line.startswith("```"): fenced = not fenced
-    if fenced: continue
+    if marked := FENCE.match(line):
+      if not fence: fence = marked.group(1)
+      elif marked.group(1).startswith(fence): fence = ""   # the same character, at least as many of it
+      continue
+    if fence: continue
     matched = HEADING.match(line)
     if matched: out.append((matched.group(1), line_number))
   return out
@@ -38,8 +42,8 @@ def apply(text: str) -> str:
 
   # the line after the frontmatter and the title, where a reader looks first
   at = next((index + 1 for index, line in enumerate(base[1:], 1) if line.strip() == "---"), 0) if base and base[0].strip() == "---" else 0
-  while at < len(base) and not base[at].startswith("# "): at += 1
-  at = min(at + 1, len(base))
+  title = next((index for index in range(at, len(base)) if base[index].startswith("# ")), None)
+  if title is not None: at = title + 1   # with no title, right after the frontmatter rather than at the end
   # the block's height follows the row count, not the numbers in it
   assemble = lambda rows: base[:at] + ["", START, "", "| section | line |", "|---|---|",
                                        *[f"| {name} | {line} |" for name, line in rows], "", END, ""] + base[at:]

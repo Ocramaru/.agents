@@ -22,6 +22,8 @@ SETTINGS = {**config.section("guard"), "enabled": True, "formatters": ["black", 
   ("ls&&black .", True), ("(black .)", True), ("ls\nblack .", True),     # an operator with no space around it still separates
   ("black --check . && black .", True),            # --check spares its own command, not the next
   ("pipx run black .", True), ("if true; then black .; fi", True), ("python3.12 -m black .", True),
+  ("make -j4 fmt", True), ("make build fmt", True),  # a target after a flag or another target
+  ("env -C src black .", True), ("nice -n 10 black .", True), ("sudo -n black .", True),   # a runner flag with a value, and one without
   ("ruff check --fix .", False),                    # the standard says this one is fine
   ("git commit -m 'fix && black stuff'", False),    # naming one is not running one
   ("grep -r prettier .", False),
@@ -33,18 +35,22 @@ def test_a_command_is_blocked_only_when_it_runs_a_rewriter(command, blocked, tmp
   assert bool(formatter(command, SETTINGS, tmp_path)) is blocked, command
 
 
-def precommit(tmp_path, hook_id):
+def precommit(tmp_path, *hook_ids):
   tmp_path.mkdir(parents=True, exist_ok=True)
   (tmp_path / ".git").mkdir()
-  (tmp_path / ".pre-commit-config.yaml").write_text(f"repos:\n- repo: x\n  hooks:\n    - id: {hook_id}\n")
+  (tmp_path / ".pre-commit-config.yaml").write_text("repos:\n- repo: x\n  hooks:\n" + "".join(f"    - id: {hook_id}\n" for hook_id in hook_ids))
   return tmp_path
 
 
 def test_pre_commit_is_judged_by_what_its_config_runs(tmp_path):
-  """A pre-commit config that only lints is not a formatter."""
-  lint, fmt = precommit(tmp_path / "a", "ruff-check"), precommit(tmp_path / "b", "ruff-format")
+  """A pre-commit config that only lints is not a formatter, and a hook named after `run` is known by its id in the config, whatever flags stand around it."""
+  lint, fmt = precommit(tmp_path / "a", "ruff-check"), precommit(tmp_path / "b", "ruff-check", "ruff-format")
   assert formatter("pre-commit run --all-files", SETTINGS, lint) is None
   assert "ruff-format" in formatter("pre-commit run --all-files", SETTINGS, fmt)
+  assert formatter("pre-commit run ruff-check", SETTINGS, fmt) is None and "ruff-format" in formatter("pre-commit run ruff-format", SETTINGS, fmt)   # one hook named runs that hook alone
+  assert formatter("pre-commit run --all-files ruff-check", SETTINGS, fmt) is None and "ruff-format" in formatter("pre-commit run --all-files ruff-format", SETTINGS, fmt)   # after a flag too
+  assert "ruff-format" in formatter("pre-commit run --from-ref origin/main --to-ref HEAD", SETTINGS, fmt) and "ruff-format" in formatter("pre-commit run -s origin/main -v", SETTINGS, fmt)   # a flag's value is not a hook id, so every hook runs
+  assert formatter("pre-commit run --from-ref origin/main ruff-check", SETTINGS, fmt) is None and "ruff-format" in formatter("pre-commit run --from-ref=origin/main ruff-format", SETTINGS, fmt)
 
 
 def test_the_bundled_list_lets_gofmt_run():

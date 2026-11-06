@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from agentkit import hub
 
 GROUPS: dict[str, str] = {}   # group -> its line in `agent --help`, set by the module that holds its commands
-COMMANDS: list["Command"] = []
+COMMANDS: list[Command] = []
 DEFAULTS: dict[str, Callable] = {}   # group -> what bare `agent <group>` and `--list` run
 
 
@@ -41,6 +41,7 @@ def command(name: str, *, help: str = "", group: str | None = None, variadic: st
   def wrap(function):
     if any(registered.name == name and registered.group == group for registered in COMMANDS):
       raise ValueError(f"command {'/'.join(filter(None, (group, name)))} is already registered")
+    if default and group in DEFAULTS: raise ValueError(f"group {group} already runs {DEFAULTS[group].__name__} by default, so {name} cannot")
 
     COMMANDS.append(Command(name, function, help, group, variadic,
                             list(reversed(getattr(function, "_args", [])))))
@@ -54,7 +55,7 @@ def run(arguments: list[str] | None = None) -> int:
 
   A command typed alone that needs arguments prints its help. Positionals stranded after a flag go to its `variadic` list.
   """
-  if tuple(sys.argv[1:] if arguments is None else arguments) == ("--version",):   # before the parser, which every hook call would otherwise pay for
+  if (typed := tuple(sys.argv[1:] if arguments is None else arguments)) == ("--version",):   # before the parser, which every hook call would otherwise pay for
     print(f"agentkit {hub.version()}")
     return 0
 
@@ -80,7 +81,6 @@ def run(arguments: list[str] | None = None) -> int:
            for names, options in registered.args):
       needs_arguments[tuple(filter(None, (registered.group, registered.name)))] = subparser
 
-  typed = tuple(sys.argv[1:] if arguments is None else arguments)
   if typed in needs_arguments:
     needs_arguments[typed].print_help(sys.stderr)
     return 2

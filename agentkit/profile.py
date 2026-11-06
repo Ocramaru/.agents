@@ -1,6 +1,6 @@
 """Where your own standards, reviewers, backends, config and AGENTS.md live, apart from the public hub's starters.
 A profile, usually a private repo cloned to `~/.agents/profile`, replaces a starter of the same name; a repo's standards still layer on top.
-Where it lives is this machine's, in the gitignored `local.toml`, which also takes any config.toml section for a machine with no profile.
+Where it lives is this machine's, in the gitignored `local.toml`, which also takes any config.toml section for a machine with no profile; `subject` is what a review of it reads.
 """
 
 import os
@@ -9,7 +9,8 @@ import subprocess
 import tomllib
 from pathlib import Path
 
-from agentkit import gh, git, hub
+from agentkit import gh, git, hub, words
+from agentkit.frontmatter import load
 
 DEFAULT = hub.HOME / "profile"   # where a profile is made or cloned when none is named
 
@@ -48,32 +49,33 @@ def save(where: Path | None) -> None:
 
 def adopt(source: str) -> tuple[int, str]:
   """Make `source` this machine's profile and remember it: `new` makes one at the default path, `none` records that there is none, a URL is cloned and a directory used where it is."""
-  if not source.strip(): return 1, "name a profile: new, none, a URL or a directory"   # Path("") is the current directory
+  source = source.strip()
+  if not source: return 1, "name a profile: new, none, a URL or a directory"   # Path("") is the current directory
   if source == "none":
     save(None)
-    return 0, "set   no profile: the starters in .agents are in use, and install stops asking"
+    return 0, words.status("set", "no profile: the starters in .agents are in use, and install stops asking")
 
   if source == "new":
     made = init(DEFAULT)
     save(DEFAULT)
-    return 0, f"made  profile at {DEFAULT}: {', '.join(made)}" if made else f"ok    profile at {DEFAULT}"
+    return 0, words.status("made", f"profile at {DEFAULT}: {', '.join(made)}") if made else words.status("ok", f"profile at {DEFAULT}")
 
   if not remote(source):
     where = Path(source).expanduser()
     if not where.is_dir(): return 1, f"no profile at {where}"
     save(where)
-    return 0, f"set   profile -> {where}"
+    return 0, words.status("set", f"profile -> {where}")
 
   if DEFAULT.exists():
-    origin = git.run(DEFAULT, "remote", "get-url", "origin").stdout.strip()
+    origin = git.run(DEFAULT, "remote", "get-url", "origin").stdout.strip() if (DEFAULT / ".git").exists() else ""   # with no .git of its own, git reads the repo around it
     if origin != source: return 1, f"{DEFAULT} already holds {origin or 'something else'}, not {source}"
     save(DEFAULT)
-    return 0, f"ok    profile -> {DEFAULT} ({source})"
+    return 0, words.status("ok", f"profile -> {DEFAULT} ({source})")
 
   result = subprocess.run(["git", "clone", "-q", source, str(DEFAULT)], capture_output=True, text=True, check=False)
   if result.returncode: return 1, f"could not clone {source}: {result.stderr.strip()}"
   save(DEFAULT)
-  return 0, f"clone profile {source} -> {DEFAULT}"
+  return 0, words.status("clone", f"profile {source} -> {DEFAULT}")
 
 
 def remote(source: str) -> bool:
@@ -89,7 +91,7 @@ def published(where: Path | None = None) -> bool:
 def publish(login: str) -> list[str]:
   """Make `login`/.agents.profile on GitHub, private, from the default profile and push it; the lines to print."""
   made = gh.run("repo", "create", f"{login}/.agents.profile", "--private", "--source", str(DEFAULT), "--remote", "origin", "--push")
-  return [f"  made  {login}/.agents.profile, private, and pushed" if made.returncode == 0 else f"  FAIL  {git.last_line(made, 'gh said nothing')}"]
+  return [words.status("made", f"{login}/.agents.profile, private, and pushed", words.UNDER) if made.returncode == 0 else words.status("FAIL", git.last_line(made, "gh said nothing"), words.UNDER)]
 
 
 def drift(where: Path) -> list[str]:
@@ -102,13 +104,49 @@ def drift(where: Path) -> list[str]:
   branch = dict(line[2:].split(" ", 1) for line in status.stdout.splitlines() if line.startswith("# "))   # its headers, which git never translates
   out = []
   dirty = len(status.stdout.splitlines()) - len(branch)
-  if dirty: out.append(f"{dirty} uncommitted change{'s' if dirty != 1 else ''}")
+  if dirty: out.append(words.count(dirty, "uncommitted change"))
 
   if "branch.upstream" not in branch: return out + ["no upstream to push to"]
   if "branch.ab" not in branch: return out + [f"its upstream {branch['branch.upstream']} is gone, or was never fetched"]
   ahead, behind = (abs(int(count)) for count in branch["branch.ab"].split())   # "+ahead -behind"
-  if ahead: out.append(f"{ahead} commit{'s' if ahead != 1 else ''} not pushed")
+  if ahead: out.append(f"{words.count(ahead, 'commit')} not pushed")
   if behind: out.append(f"{behind} behind, as of the last fetch")
+  return out
+
+
+def subject() -> dict[Path, str]:
+  """What `agent profile review` reads, each file with what it is: the profile's AGENTS.md and standards, each starter one replaces or extends, the repo overrides along every place Claude Code has run, and the memory inbox.
+  An override met in two checkouts of one repo is read once, by its place in the repo."""
+  from agentkit import memory, standards as _standards, tree   # all reach this module again, through install and config
+
+  out, where = {}, path()
+  mine = [load(file) for file in _standards.files(where / "standards")] if where and (where / "standards").is_dir() else []
+  starters, names = {load(file).name: file for file in _standards.files(hub.STANDARDS)}, {document.name for document in mine}
+  if where and (where / "AGENTS.md").is_file(): out[where / "AGENTS.md"] = "the profile's AGENTS.md: how this person works, in every repo"
+  for document in mine: out[document.path] = f"a profile standard, {document.name}" + (", replacing the starter of its name" if document.name in starters else "")
+  for document in mine:
+    if document.name in starters: out[starters[document.name]] = f"the starter {document.name}, which the profile's replaces whole"
+    for base in _standards.bases(document):
+      if base in starters and base not in names: out.setdefault(starters[base], f"the starter {base}, which the profile's {document.name} layers on")
+
+  # repo overrides: the chain from each place up to its repo root, as inject walks it
+  seen, read = {hub.STANDARDS.resolve(), *([(where / "standards").resolve()] if where else [])}, set()
+  for place in [*memory.places(), Path.cwd()]:
+    for agents_dir in tree.chain(place):
+      if (standards := agents_dir / hub.STANDARDS_DIR).resolve() in seen or not standards.is_dir(): continue
+      seen.add(standards.resolve())
+      # a repo is its origin, else its main checkout, so its worktrees and clones are one repo and another repo with the same text is not
+      checkout = (git.root(agents_dir) or agents_dir.parent).resolve()
+      repo = (git.run(checkout, "remote", "get-url", "origin").stdout.strip() or str(git.main_checkout(checkout) or checkout), os.path.relpath(agents_dir.resolve(), checkout))
+      for file in _standards.files(standards):
+        if (repo, file.relative_to(agents_dir)) in read: continue   # the same override in another worktree of its repo
+        read.add((repo, file.relative_to(agents_dir)))
+        name = load(file).name
+        out[file] = f"a repo standard, {name}, for files in {agents_dir.parent}, " + ("layered on the profile's of its name" if name in names else "layered on the starter of its name" if name in starters else "the repo's own, since no profile or starter standard has its name")
+
+  inbox = memory.inbox()
+  homes = {project: memory.place(project) for project in {file.parent.parent for file in inbox}}   # a project folder holds several memories, and finding its place walks the disk
+  for file in inbox: out[file] = f"a memory Claude Code saved for sessions in {homes[file.parent.parent] or f'a directory that no longer exists ({file.parent.parent.name})'}"
   return out
 
 
@@ -123,6 +161,12 @@ def init(where: Path) -> list[str]:
     if not (where / template.name).exists():
       shutil.copy(template, where / template.name)
       made.append(template.name)
+
+  # what `agent profile review` keeps in the profile is ignored from the first commit, so a review leaves nothing to commit
+  if not (ignore := where / hub.AGENTS_DIR / ".gitignore").exists():
+    ignore.parent.mkdir(exist_ok=True)
+    shutil.copy(hub.TEMPLATES / "agents" / ".gitignore", ignore)
+    made.append(".agents/.gitignore")
 
   # nested in the .agents clone is fine, .agents ignores it; and .git only if init worked
   if not (where / ".git").exists() and subprocess.run(["git", "init", "-q", "-b", "main", str(where)], check=False).returncode == 0:

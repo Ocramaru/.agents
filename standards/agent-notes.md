@@ -1,6 +1,6 @@
 ---
 name: agent-notes
-description: How the .agents notes are written: context, learned, todo, todo.archive
+description: How the .agents notes are written: what context, learned, todo and todo.archive each hold
 applies: context.md, learned.md, todo.md, todo.archive.md, agents.toml
 related: markdown
 ---

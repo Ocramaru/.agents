@@ -6,10 +6,11 @@ Nothing is stored outside the notes themselves, so there is no second copy to dr
 import re
 from pathlib import Path
 
-from agentkit import mapblock
+from agentkit import hub, mapblock, words
 from agentkit.frontmatter import load, parse
 
-NOTES = ("context", "learned", "todo", "todo.archive")  # every note file the convention defines
+ARCHIVE = "todo.archive"   # the note of finished tasks, which is kept but never injected
+NOTES = ("context", "learned", "todo", ARCHIVE)  # every note file the convention defines
 
 
 def note_files(agents_dir: Path) -> list[Path]:
@@ -25,7 +26,7 @@ def note_files(agents_dir: Path) -> list[Path]:
 
 def holds(directory: Path) -> bool:
   """Whether `directory` is a note directory: a `.agents`, or the `.local` directly inside one."""
-  return directory.name == ".agents" or (directory.name == ".local" and directory.parent.name == ".agents")
+  return directory.name == hub.AGENTS_DIR or (directory.name == hub.LOCAL_DIR and directory.parent.name == hub.AGENTS_DIR)
 
 
 def is_note(path: Path) -> bool:
@@ -56,7 +57,7 @@ def abandoned(path: Path, old: str, new: str) -> str:
   done = [archived for archive in note_files(note.parent if holds(note.parent) else note.parent.parent) if match_name(archive) == "todo.archive.md" for archived in tasks(archive.read_text(encoding="utf-8"))]   # or its parts
   # task against task, never the archive as text, where any line mentioning a task counts as filing it
   if not (gone := [task for task in gone if not _listed(task, done)]): return ""
-  return (f"This edit removes {len(gone)} task{'' if len(gone) == 1 else 's'} from {note.name}, {'which is' if len(gone) == 1 else 'which are'} not in todo.archive.md. A finished task is moved "
+  return (f"This edit removes {words.count(len(gone), 'task')} from {note.name}, {'which is' if len(gone) == 1 else 'which are'} not in todo.archive.md. A finished task is moved "
           f"there, not deleted: it is the cheapest record of why the code looks the way it does. If one is abandoned rather than done, say that where it goes.\n{"\n".join(f"  - {task}" for task in gone)}")
 
 
@@ -66,7 +67,7 @@ def _listed(task: str, pool: list[str]) -> bool:
   A move or an edit reformats a task and annotates its end, but keeps its start.
   """
   start, *entries = (" ".join(re.sub(r"[`*\[\]]", "", text).split()) for text in (task, *pool))
-  return any(entry.startswith(start[:48]) for entry in entries)
+  return bool(start) and any(entry.startswith(start[:48]) for entry in entries)   # a task that is only markup starts every entry
 
 
 def match_name(path: Path) -> str:
@@ -99,7 +100,7 @@ def summary(path: Path) -> str:
   if description: return f"{path.name} ({size}): {description}"
 
   names = [heading for heading, _ in mapblock.headings(path.read_text(encoding="utf-8").splitlines()) if heading.lower() not in ("what we learned", "todo")]   # the notes' own titles
-  return f"{path.name} ({size}){f": {', '.join(names[:6])}" if names else ""}"
+  return f"{path.name} ({size})" + (f": {', '.join(names[:6])}" if names else "")
 
 
 def split(path: Path) -> list[Path]:

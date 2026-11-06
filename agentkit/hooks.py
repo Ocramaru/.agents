@@ -10,7 +10,7 @@ from pathlib import Path
 
 from agentkit import git, hub
 
-LOG = Path(os.environ.get("AGENTS_HOOK_LOG") or Path.home() / ".agents" / ".hooks.log")   # hooks/log.sh reads the same variable
+LOG = Path(os.environ.get("AGENTS_HOOK_LOG") or Path.home() / hub.AGENTS_DIR / ".hooks.log")   # hooks/log.sh reads the same variable
 
 
 ROUTINE = ("allow", "off", "skip")   # ran and had nothing to decide; the record keeps them

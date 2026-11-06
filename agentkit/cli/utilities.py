@@ -5,7 +5,7 @@
 
 import sys
 
-from agentkit import backends, install
+from agentkit import backends, install, words
 from agentkit.cli.out import fail, line
 
 
@@ -58,7 +58,7 @@ class CliHelpers:
     found = {name: backend.here() for name, backend in known.items()}
     answer = CliHelpers.ask("Reviews run on a model. Which of these does this machine have?", {name: f"{known[name].spec.get('label', name)} ({said})" for name, (_, said) in found.items()}, default=next((name for name, (here, _) in found.items() if here), None))
     if not answer: return ""
-    line(f"  set   default = {answer} in {install.home(backends.choose(answer))}")
+    line(words.status("set", f"default = {answer} in {install.home(backends.choose(answer))}", words.UNDER))
     return answer
 
   @staticmethod

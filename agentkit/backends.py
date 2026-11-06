@@ -5,6 +5,7 @@ A backend with `resume_argv` keeps its own context between turns; one without ge
 
 import http.client
 import json
+import os
 import re
 import shutil
 import socket
@@ -20,6 +21,7 @@ from agentkit import config, hub, profile
 
 PLACEHOLDER = re.compile(r"\{(model|prompt|session|effort)\}")
 UNSET = "no default backend is set, so a review has nowhere to run"
+HEADLESS = "no default backend is set, so headless reviews (post-commit, doc-check) cannot run"   # what update says, since nobody is there to be asked
 
 
 def _fill(template: list[str], values: dict[str, str]) -> list[str]:
@@ -85,7 +87,8 @@ class Backend:
                      f"Add one to [backends.{self.name}] models in config.toml, or pick another with --backend")
 
   def run(self, prompt: str, role: str = "text", session: str | None = None, effort: str | None = None) -> Reply:
-    """Send a prompt to the model for `role`."""
+    """Send a prompt to the model for `role`.
+    `effort` reaches a CLI backend only, as its `effort_argv`; an HTTP endpoint has no such setting."""
     model = self.model_for(role)
 
     if self.kind == "cli": return self._cli(prompt, model, session, self.timeout, effort)
@@ -98,8 +101,9 @@ class Backend:
     if effort and self.spec.get("effort_argv"): arguments += _fill(self.spec["effort_argv"], {"effort": effort})
 
     # stdin closed: `claude -p` waits for input on any stdin left open, and a hook's always is
+    # AGENTS_REVIEWER: the reviewer is a session the machine's hooks fire in too, and they skip it rather than add notes its verdict digest never hashed
     result = subprocess.run(arguments, capture_output=True, check=False, text=True, timeout=timeout,
-                            stdin=subprocess.DEVNULL)
+                            stdin=subprocess.DEVNULL, env=os.environ | {"AGENTS_REVIEWER": "1"})
     if result.returncode != 0: raise RuntimeError(f"{self.name} exited {result.returncode}: {result.stderr.strip()[:400]}")
     return self._unwrap(result.stdout.strip(), session)
 
@@ -132,9 +136,14 @@ class Backend:
       try:
         with urllib.request.urlopen(urllib.request.Request(self.spec["url"], data=payload, headers={"Content-Type": "application/json"}), timeout=timeout) as response: return Reply(json.loads(response.read())["choices"][0]["message"]["content"].strip())
       except (urllib.error.URLError, http.client.HTTPException, ConnectionError, TimeoutError) as error:
-        if isinstance(error, urllib.error.HTTPError) and error.code < 500: raise RuntimeError(f"{self.name} refused the call at {self.spec['url']}: {error}") from error   # a wrong model or a bad request, which no wait changes
+        answered = isinstance(error, urllib.error.HTTPError)
+
+        if answered and error.code < 500 and error.code not in (408, 429): 
+          raise RuntimeError(f"{self.name} refused the call at {self.spec['url']}: {error}") from error   # a wrong model or a bad request, which no wait changes
+        
         last = error
-        if attempt + 1 < tries: time.sleep(2 * (attempt + 1))
+        after = str((error.headers.get("Retry-After") if answered and error.headers else None) or "").strip()   # a server too busy, or timing a request out, may say when to come back; only seconds are read
+        if attempt + 1 < tries: time.sleep(min(int(after), timeout) if after.isdigit() else 2 * (attempt + 1))
 
     raise RuntimeError(f"{self.name} unreachable at {self.spec['url']} after {tries} tries: {last}") from last
 
@@ -179,7 +188,9 @@ def get(name: str | None = None) -> Backend:
 
 
 def choose(name: str) -> Path:
-  """Make `name` the default backend: in the profile's config.toml, or this machine's local.toml when there is no profile. Returns the file written."""
+  """Make `name` the default backend: in the profile's config.toml, or this machine's local.toml when there is no profile. Returns the file written.
+  local.toml is read after the profile, so a default it set before there was one is dropped, or that would still win."""
   where = root / "config.toml" if (root := profile.path()) else hub.LOCAL
   config.write(where, "backends", "default", name)
+  if where != hub.LOCAL: config.write(hub.LOCAL, "backends", "default", None)
   return where

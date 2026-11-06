@@ -1,6 +1,6 @@
 ---
 name: python
-description: How Python is run, linted and laid out here
+description: How Python is run, linted and laid out here: through the project's environment, never a whole-file formatter unasked, matching the file
 applies: *.py, *.pyi, *.ipynb, pyproject.toml
 related: commits
 ---

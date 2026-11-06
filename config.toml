@@ -20,6 +20,20 @@ jobs = 4
 limit = 0
 max_bytes = 200_000
 
+# Directories nothing reads, by name or glob; one list, so finding notes and choosing files to review cannot disagree.
+# Every layer adds to it, so a repo with a `data/` of its own names it in its agents.toml.
+[walk]
+skip = [
+  ".git", ".hg", ".svn",                                                     # version control
+  ".venv", "venv", ".direnv", "node_modules", "bower_components",            # environments, dependencies
+  "site-packages", "dist-packages", ".eggs", "*.egg-info",
+  "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox",      # caches
+  ".nox", ".cache", ".parcel-cache", ".turbo", ".ipynb_checkpoints", ".gradle",
+  "dist", "build", "_build", "target", "cdk.out", ".next", ".nuxt",           # build output
+  ".serverless", ".terraform", "htmlcov",
+  "_site", "_book", ".quarto", "site_libs", "vendor",                        # generated sites, vendored code
+]
+
 [inject]
 budget = 24000     # guard only; context-only chains come in far under this
 map_over = 6144    # a note larger than this is sent as its section map, to be read by section.
@@ -27,6 +41,10 @@ map_over = 6144    # a note larger than this is sent as its section map, to be r
                    # 375-byte table instead of a note it could simply have read.
 nearest = "context"     # only context.md loads automatically; it says how to operate here
 ancestors = "context"   # same for ancestors: assumptions bind, findings do not
+# Whether opening a file with Read injects what editing it would, by adding Read to the hook's matcher; `agent install`
+# rewrites the block when this changes. Off: replayed over 197 sessions it sent 32% more text, half of it standards for
+# files the session never edited, while the notes for where a session starts already arrive at SessionStart.
+read = false
 
 # Commands the no-reformat hook refuses, once `enabled`. An entry's words lead the command, as globs, and
 # its flags appear anywhere in it: `ruff check --unsafe-fixes`. A profile or local.toml turns it on or
@@ -42,6 +60,7 @@ advice = "this layout is hand-maintained and a formatter undoes it. Lint with 'r
 runners = ["sudo", "env", "time", "nice", "nohup", "xargs", "command", "exec", "!", "{", "if", "then", "else", "elif", "do", "while", "until", "uv run", "uv tool run", "uvx", "pipx run", "poetry run", "pdm run", "hatch run", "pipenv run", "rye run", "mise exec", "mise x", "nox", "tox", "npx", "pnpm exec", "pnpm dlx", "yarn", "yarn dlx", "yarn exec", "bunx", "bun x", "deno run", "python* -m"]
 scripts = ["make", "just", "npm run", "pnpm run", "yarn run", "yarn", "bun run"]
 inspect = ["--check", "--diff", "--list-different", "--dry-run"]
+valued = ["-C", "-S", "-u", "-g", "-n", "-I", "-P", "-L", "-d", "-p", "--chdir", "--user", "--group", "--with", "--from", "--python", "--project", "--directory", "--package"]   # a runner's flags that take the next word as their value
 
 # Where agents run, by name. `resume_argv` means the backend keeps its own context; without it, replay.
 # No default ships, so nothing runs on a model unasked: `agent install` asks which of these this machine has and writes

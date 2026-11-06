@@ -1,6 +1,6 @@
 ---
 name: shell
-description: How shell scripts are written, checked and laid out here
+description: How shell scripts are written, checked and laid out here: bash, `set -euo pipefail`, quote everything, dry-run and portable to macOS
 applies: *.sh, *.bash, *.zsh, zshrc, .zshrc, bashrc, .bashrc, .profile, .zprofile
 related: commits
 ---

@@ -1,14 +1,17 @@
 """How results read: what a review's result was, one review as it lands, the open findings as a table.
 
-Kept apart from the commands because a run prints a result live and `agent sub reviews` prints it
-again later, and both print it the same way.
+Kept apart from the commands because a run prints a result live and `agent sub reviews` prints it again later, and both print it the same way.
 """
 
 import re
 import sys
 
-from agentkit import review, reviews, session
+from agentkit import review, reviews, session, words
 from agentkit.cli.out import escape, note, oneline, say, table, took
+
+MARKS = {"failed": ("✗", "red"), "asked": ("?", "cyan"), "clean": ("✓", "green"), "found": ("●", "yellow")}   # a result's glyph and color
+INDENT = 4   # a result's lines under its heading
+COLUMN = 6   # the width a finding's line is right-aligned to, so the findings' text starts in one column
 
 
 def outcome(reviewed: dict) -> str:
@@ -22,33 +25,42 @@ def outcome(reviewed: dict) -> str:
 
 def result(reviewed: dict, at: str = "", out=None) -> None:
   """One review: what it returned, and the command that acts on it, printed as a run lands and when read back."""
-  put = lambda text: say(text, out)
+  put = lambda text, indent=0: say(" " * indent + text, out)
+  hang = lambda text, indent: escape(str(text)).replace("\n", "\n" + " " * indent)
+  where = lambda finding: str(finding.get("line", "?")) if finding.get("file", reviewed["file"]) == reviewed["file"] else f"{finding['file']}:{finding.get('line', '?')}"   # a review over several files names each finding's file
 
-  head = f"{at}{escape(reviewed['file'])}  [dim]{escape(reviewed['agent'])}{f" · {took(reviewed['seconds'])}" if reviewed.get("seconds") else ""}[/dim]"
   count, kind = len(reviewed["findings"]), outcome(reviewed)
+  glyph, color = MARKS.get(kind, ("", ""))
+  timing = f" · {took(reviewed['seconds'])}" if reviewed.get("seconds") else ""
+  head = f"{at}{escape(reviewed['file'])}  [dim]{escape(reviewed['agent'])}{timing}[/dim]"
+  status = lambda label, after="": put(f"[{color}]{glyph}[/{color}] {head}  [{color}]{label}[/{color}]{after}")
 
   if kind == "failed":
-    put(f"[red]✗[/red] {head}  [red]failed[/red]")
-    put(f"    {'answered without the JSON it was asked for' if reviewed.get('kind') == session.UNREADABLE else 'error'}: [dim]{escape(oneline(reviewed['body'], 240))}[/dim]")
-    if reviewed.get("task"): put(f"    [dim]its whole reply: agent sub reviews {reviewed['task']}[/dim]")
+    status("failed")
+    put(f"{'answered without the JSON it was asked for' if reviewed.get('kind') == session.UNREADABLE else 'error'}: [dim]{escape(oneline(reviewed['body'], 240))}[/dim]", INDENT)
+    if reviewed.get("task"): put(f"[dim]its whole reply: agent sub reviews {reviewed['task']}[/dim]", INDENT)
   elif kind == "asked":
-    put(f"[cyan]?[/cyan] {head}  [cyan]asked a question[/cyan]")
-    put(f"    {escape(reviewed['body'])}")
-    put(f"    [dim]answer: agent sub reply {reviewed['task']} '<answer>'[/dim]")
+    status("asked a question")
+    put(escape(reviewed["body"]), INDENT)
+    put(f"[dim]answer: agent sub reply {reviewed['task']} '<answer>'[/dim]", INDENT)
   elif kind == "unchanged":   # not asked again: its verdict still stands
     put(f"[dim]= {at}{escape(reviewed['file'])}  {escape(reviewed['agent'])}  unchanged since run {reviewed['reused']} · {f'{count} still open' if count else 'nothing open'}[/dim]")
-    for finding in reviewed["findings"]: put(f"    [dim]{escape(str(finding.get('line', '?'))):>6}  {escape(oneline(finding.get('issue', ''), 120))}[/dim]")
+    for finding in reviewed["findings"]: put(f"[dim]{escape(where(finding)):>{COLUMN}}  {escape(oneline(finding.get('issue', ''), 120))}[/dim]", INDENT)
   elif kind == "empty":
     put(f"[dim]– {at}{escape(reviewed['file'])}  empty, nothing to review[/dim]")
   elif kind == "clean":
-    put(f"[green]✓[/green] {head}  [green]clean[/green]{f"  [dim]{escape(oneline(reviewed['body'], 120))}[/dim]" if reviewed["body"] else ""}")
+    status("clean", f"  [dim]{escape(oneline(reviewed['body'], 120))}[/dim]" if reviewed["body"] else "")
   else:
-    put(f"[yellow]●[/yellow] {head}  [yellow]{count} finding{'s' if count != 1 else ''}[/yellow]")
-    if reviewed["body"]: put(f"    {escape(reviewed['body'])}")
+    status(words.count(count, "finding"))
+    if reviewed["body"]: put(escape(reviewed["body"]), INDENT)
     for finding in reviewed["findings"]:
-      put(f"    [bold]{escape(str(finding.get('line', '?'))):>6}[/bold]  " + escape(finding.get("issue", "")).replace("\n", "\n            "))
-      if finding.get("fix"): put("            [dim]→ " + escape(str(finding["fix"])).replace("\n", "\n              ") + "[/dim]")
-    put(f"    [dim]fixed it? agent sub review --recheck {escape(reviewed['file'])}[/dim]")
+      label = where(finding)
+      width = max(COLUMN, len(label))   # a file:line label pushes its text right
+      text = INDENT + width + 2   # where the finding's text starts, past the label and its gap
+      put(f"[bold]{escape(label):>{width}}[/bold]  {hang(finding.get('issue', ''), text)}", INDENT)
+      if finding.get("fix"): put(f"[dim]→ {hang(finding['fix'], text + 2)}[/dim]", text)
+    again = reviewed.get("again") or f"agent sub review --recheck {reviewed['file']}"
+    put(f"[dim]fixed it? {escape(again)}[/dim]", INDENT)
 
 
 def findings(found: list[dict], full: bool = False) -> int:
@@ -76,7 +88,7 @@ def findings(found: list[dict], full: bool = False) -> int:
       if full: row.append(escape(" ".join(str(group["fix"]).split())))
       rows.append(row)
 
-  return table(["file", "reviewer", "line", "finding", "id"] + (["fix"] if full else []), rows, title=f"{len(found)} open in {len(files)} file{'' if len(files) == 1 else 's'}",
+  return table(["file", "reviewer", "line", "finding", "id"] + (["fix"] if full else []), rows, title=f"{len(found)} open in {words.count(len(files), 'file')}",
                note="agent sub close <id ...> --as fixed|wrong|wontfix --reason '…'   ·   agent sub review --recheck"
                     + ("" if full else "   ·   --full for each fix"),
                wide=("finding", "fix", "line"), group=True)

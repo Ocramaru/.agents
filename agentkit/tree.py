@@ -12,30 +12,26 @@ from agentkit import config, git, hub, notes
 from agentkit.frontmatter import load
 
 AGENTS_TOML = "agents.toml"
-INJECTABLE = ("context", "learned", "todo")             # the archive is never injected
+INJECTABLE = tuple(name for name in notes.NOTES if name != notes.ARCHIVE)             # the archive is never injected
 INJECT_MODES = ("full", "context", "none")   # what agents.toml `inject` may say: every injectable note, the context note alone, or none
-# Directories nothing reads; one list, so finding notes and choosing files to review cannot disagree.
-SKIP = frozenset({
-  ".git", ".hg", ".svn",                                                     # version control
-  ".venv", "venv", ".direnv", "node_modules", "bower_components",            # environments, dependencies
-  "site-packages", "dist-packages", ".eggs",
-  "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".tox",      # caches
-  ".nox", ".cache", ".parcel-cache", ".turbo", ".ipynb_checkpoints", ".gradle",
-  "dist", "build", "_build", "target", "cdk.out", ".next", ".nuxt",           # build output
-  ".serverless", ".terraform", "htmlcov",
-  "_site", "_book", ".quarto", "site_libs", "vendor",                        # generated sites, vendored code
-})
 
 
-def ignored(name: str) -> bool:
-  """Whether nothing should read a directory of this name; `*.egg-info` is matched by its end."""
-  return name in SKIP or name.endswith(".egg-info")
+def skipped(repo: Path | None = None) -> list[str]:
+  """The directory names and globs nothing reads, `[walk] skip` from every layer added together, `repo`'s agents.toml last."""
+  try: return config.section("walk", repo, add=("skip",))["skip"]
+  except tomllib.TOMLDecodeError: return []   # a layer that does not parse is doctor's to report, and doctor walks before it can; until then nothing is skipped
+
+
+def ignored(name: str, skip: list[str]) -> bool:
+  """Whether nothing should read a directory of this name, as `skipped` lists them."""
+  return any(fnmatch.fnmatch(name, pattern) for pattern in skip)
 
 
 def agents_toml(agents_dir: Path) -> dict:
   """A `.agents` directory's agents.toml, or `{}`."""
   file = Path(agents_dir) / AGENTS_TOML
-  return tomllib.loads(file.read_text(encoding="utf-8")) if file.is_file() else {}
+  try: return tomllib.loads(file.read_text(encoding="utf-8")) if file.is_file() else {}
+  except tomllib.TOMLDecodeError: return {}   # a file that does not parse is doctor's to report; until then it sets nothing, so an edit still gets its standards and notes
 
 
 def is_hub(agents_dir: Path) -> bool:
@@ -47,13 +43,24 @@ def is_hub(agents_dir: Path) -> bool:
 def find_note_dirs(root: Path) -> list[Path]:
   """Every `.agents` directory under a tree that holds notes, and each `.local` inside one that does.
 
-  It walks rather than globs, so a SKIP directory is pruned before it is entered and no symlink is followed.
+  Inside a repo git's index names them, so another checkout below it and a gitignored directory are never read, and `[walk] skip` still applies; outside one it walks.
+  It walks rather than globs, so a skipped directory is pruned before it is entered and no symlink is followed.
   """
-  found = []
-  for here, directories, _ in os.walk(Path(root).resolve()):
-    directories[:] = [name for name in directories if not ignored(name)]
-    if ".agents" in directories: found += [directory for directory in (Path(here) / ".agents", Path(here) / ".agents" / ".local") if notes.note_files(directory)]
-  return sorted(found)
+  start, skip = Path(root).resolve(), skipped(root)
+  listed = git.run(start, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", f":(glob)**/{hub.AGENTS_DIR}/**")
+  if listed.returncode:
+    found = []
+    for here, directories, _ in os.walk(start):
+      directories[:] = [name for name in directories if not ignored(name, skip)]
+      if hub.AGENTS_DIR in directories: found += [directory for directory in (Path(here) / hub.AGENTS_DIR, Path(here) / hub.AGENTS_DIR / hub.LOCAL_DIR) if notes.note_files(directory)]
+    return sorted(found)
+
+  # a `.local` is gitignored, so it is asked for apart; --directory names an ignored directory without entering it, so a `.local` shows as itself and one under an ignored directory not at all
+  local = git.run(start, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory", "--", f":(glob)**/{hub.AGENTS_DIR}/{hub.LOCAL_DIR}/**").stdout.split("\0")
+  entries = [entry for entry in listed.stdout.split("\0") + local if entry and not any(ignored(name, skip) for name in entry.rstrip("/").split("/")[:-1])]   # judged from `root` down, as review.unread judges a file
+  found = {path.parent if notes.holds(path.parent) else path.parent.parent for path in (start / entry for entry in entries) if notes.is_note(path)}   # a split note's part sits one level below its directory
+  found |= {path for path in (start / entry for entry in entries if entry.endswith("/")) if path.name == hub.LOCAL_DIR and notes.holds(path)}
+  return sorted(directory for directory in found if notes.note_files(directory))
 
 
 def chain(path: Path) -> list[Path]:
@@ -61,16 +68,24 @@ def chain(path: Path) -> list[Path]:
 
   It walks up to the repo root, so a chain never leaves its repo.
   """
+  found = []
+  for current in above(path):
+    if (current / hub.AGENTS_DIR).is_dir(): found += [directory for directory in (current / hub.AGENTS_DIR / hub.LOCAL_DIR, current / hub.AGENTS_DIR) if notes.note_files(directory) or (directory / AGENTS_TOML).is_file()]   # the list is reversed below; config alone counts: [applies] with no notes
+  return list(reversed(found))
+
+
+def above(path: Path) -> list[Path]:
+  """The directories a chain looks in for a `.agents`, nearest first: the file's own, up to its repo root, or home outside a repo."""
   start = Path(path).resolve()
   start = start if start.is_dir() else start.parent
   stop = git.root(start) or Path.home()   # a repo is the unit a collaborator reproduces
 
   found, current = [], start
   while True:
-    if (current / ".agents").is_dir(): found += [directory for directory in (current / ".agents" / ".local", current / ".agents") if notes.note_files(directory) or (directory / AGENTS_TOML).is_file()]   # the list is reversed below; config alone counts: [applies] with no notes
+    found.append(current)
     if current == stop or current.parent == current: break
     current = current.parent
-  return list(reversed(found))
+  return found
 
 
 def payload(path: Path, skip: set[Path] | None = None) -> tuple[str, list[str], list[Path]]:
@@ -156,12 +171,12 @@ def parts(agents_dir: Path, name: str) -> list[tuple[Path, list[str]]]:
 
 def owner(directory: Path) -> Path:
   """The `.agents` a note directory belongs to: itself, or the one a `.local` sits in, so a `.local` takes its parent's inject mode, set or default."""
-  return directory.parent if directory.name == ".local" else directory
+  return directory.parent if directory.name == hub.LOCAL_DIR else directory
 
 
 def label(agents_dir: Path) -> str:
   """A note directory's scope, repo-relative where possible, so injected text is the same wherever the hook ran; a `.local` is its parent's plus `/.local`."""
-  if agents_dir.name == ".local": return f"{label(agents_dir.parent)}/.local"
+  if agents_dir.name == hub.LOCAL_DIR: return f"{label(agents_dir.parent)}/{hub.LOCAL_DIR}"
   scope = Path(agents_dir).parent
   root = git.root(scope)
 
@@ -183,7 +198,7 @@ def note_dirs_for(path: Path) -> list[Path]:
 
   current = start
   while True:   # the closest above, not counting one inside the path itself
-    if current != start and notes.note_files(current / ".agents"): return [current / ".agents"]
+    if current != start and notes.note_files(current / hub.AGENTS_DIR): return [current / hub.AGENTS_DIR]
     if current == Path.home() or current.parent == current: return []
     current = current.parent
 
@@ -194,7 +209,7 @@ def init(target: Path) -> dict:
   Nothing records where it sits, so it survives a clone, and the README explains it to a reader without the tooling.
   """
   target = Path(target).resolve()
-  agents_dir = target / ".agents"
+  agents_dir = target / hub.AGENTS_DIR
   made = not agents_dir.is_dir()
   agents_dir.mkdir(parents=True, exist_ok=True)
 

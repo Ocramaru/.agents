@@ -1,4 +1,4 @@
-"""What this machine has, on one read-only screen: the install, the profile, the backend, what is in force here, and the hooks.
+"""What this machine has, on one read-only screen: the install, the profile, the backend, what is in force here, the memory waiting, and the hooks.
 `doctor` judges and this describes, so a broken part is described where doctor would fail it, and the screen always draws.
 """
 
@@ -6,7 +6,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from agentkit import agents, backends, git, hooks, hub, inject, install, notes, profile as _profile, reviews, tree
+from agentkit import agents, backends, git, hooks, hub, inject, install, memory, notes, profile as _profile, reviews, tree, words
 
 
 def short(path: Path | str) -> str:
@@ -36,9 +36,10 @@ def backend() -> list[tuple[str, str, str]]:
   found, roles, models = agents.definitions(), {}, {}
   for name, definition in sorted(found.items()): roles.setdefault(definition.get("model"), []).append(name)
   for role, model in (known[default].spec.get("models", {}) if default in known else {}).items(): models.setdefault(model, []).append(role)
+  grouped = lambda groups: "  ·  ".join(f"{key} ({', '.join(names)})" for key, names in groups)
   return [("backend", f"{default} (of {', '.join(sorted(known))})", "") if default in known else ("backend", f"{default}, which [backends] does not define", "fail") if default else ("backend", f"none set (of {', '.join(sorted(known))}): `agent install --backend <name>`, or a review at a terminal asks", "warn"),
-          ("models", "  ·  ".join(f"{model} ({', '.join(names)})" for model, names in models.items()) or "none", ""),
-          ("reviewers", f"{len(found)}, asking for {'  ·  '.join(f"{role} ({', '.join(names)})" for role, names in sorted(roles.items()))}" if found else "none", "")]
+          ("models", grouped(models.items()) or "none", ""),
+          ("reviewers", f"{len(found)}, asking for {grouped(sorted(roles.items()))}" if found else "none", "")]
 
 
 def counts() -> list[tuple[str, str, str]]:
@@ -58,19 +59,27 @@ def findings() -> list[tuple[str, str, str]]:
 
   found = reviews.open_findings(root)
   files = {finding["file"] for finding in found}
-  return [("findings", f"{len(found)} open in {len(files)} file{'' if len(files) == 1 else 's'} of {short(root)} (`agent sub reviews --open` lists them)", "warn") if found else ("findings", f"none open in {short(root)}", "")]
+  return [("findings", f"{len(found)} open in {words.count(len(files), 'file')} of {short(root)} (`agent sub reviews --open` lists them)", "warn") if found else ("findings", f"none open in {short(root)}", "")]
 
 
-def claude() -> list[tuple[str, str, str]]:
-  """Whether Claude Code's settings.json holds the hooks block exactly as agentkit bundles it."""
+def inbox() -> list[tuple[str, str, str]]:
+  """How many of Claude Code's auto memories are waiting to move into a .agents or the profile, and how many project folders hold them."""
+  found = memory.inbox()
+  if not found: return [("claude memory", f"none waiting (in {short(memory.projects())})", "")]
+  folders = len({path.parent for path in found})
+  return [("claude memory", f"{words.count(len(found), 'file')} waiting in {words.count(folders, 'project folder')} of {short(memory.projects())} (`agent profile review` says where each belongs)", "")]
+
+
+def claude_hooks() -> list[tuple[str, str, str]]:
+  """Whether Claude Code's settings.json holds the hub's hooks as `agent install` writes them, known by the script each runs, so the user's own hooks beside them do not count."""
   settings = install.config_dir("claude") / "settings.json"
   if not settings.is_file(): return [("claude hooks", f"not in place (there is no {short(settings)})", "fail")]
   try: live = json.loads(settings.read_text(encoding="utf-8"))
   except ValueError as error: return [("claude hooks", f"unknown ({short(settings)} is not valid JSON, {error})", "fail")]
 
-  block = live.get("hooks") if isinstance(live, dict) else None
-  if block == json.loads((hub.BUNDLED / "settings.hooks.json").read_text(encoding="utf-8")): return [("claude hooks", f"in place ({short(settings)})", "")]
-  return [("claude hooks", f"not in place ({short(settings)})", "fail") if block is None else ("claude hooks", f"a block other than the one agentkit bundles ({short(settings)})", "warn")]
+  ours = install.partition(live.get("hooks") if isinstance(live, dict) else None)[0]
+  if ours == install.claude_block(): return [("claude hooks", f"in place ({short(settings)})", "")]
+  return [("claude hooks", f"not in place ({short(settings)})", "fail") if not ours else ("claude hooks", f"other than the ones agentkit bundles ({short(settings)})", "warn")]
 
 
 def githooks() -> list[tuple[str, str, str]]:
@@ -87,7 +96,7 @@ def errors() -> list[tuple[str, str, str]]:
   return [("hook errors", f"{len(found)} since .agents last changed (the latest from {found[-1][1]} at {found[-1][0][:16].replace('T', ' ')})", "warn"), ("hook errors", found[-1][4][:120], "")]
 
 
-PARTS = {"agentkit": release, "profile": profile, "backend": backend, "standards": counts, "findings": findings, "claude hooks": claude, "git hooks": githooks, "hook errors": errors}
+PARTS = {"agentkit": release, "profile": profile, "backend": backend, "standards": counts, "findings": findings, "claude memory": inbox, "claude hooks": claude_hooks, "git hooks": githooks, "hook errors": errors}
 
 
 def rows() -> list[tuple[str, str, str]]:

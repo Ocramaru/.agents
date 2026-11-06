@@ -3,7 +3,18 @@
 The path insert and the profile switch-off live here because pytest imports this before any test module, so the checkout is what every test imports.
 """
 
-import atexit, json, os, select, shutil, signal, subprocess, sys, tempfile, time
+import atexit
+import json
+import os
+import select
+import shlex
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -11,12 +22,9 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 AGENT = REPO / "bin" / "agent"
 UV_CACHE = os.environ.get("UV_CACHE_DIR") or str(Path.home() / ".cache" / "uv")   # uv's own cache, which a test's HOME would otherwise move
+GITHUB = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_HOST", "GH_CONFIG_DIR", "XDG_CONFIG_HOME")   # this machine's GitHub tokens and config, which no CLI a test runs inherits
 
 sys.path.insert(0, str(REPO))
-
-from agentkit import agents, review, reviews
-from agentkit.backends import Reply
-from agentkit.session import Message, Session
 
 # The suite tests agentkit, not whoever runs it. Empty means no profile, and the CLI subprocesses
 # inherit it; a test about profiles sets its own.
@@ -25,6 +33,11 @@ hook_logs = Path(tempfile.mkdtemp(prefix="agents-hooks-"))
 atexit.register(shutil.rmtree, hook_logs, ignore_errors=True)
 os.environ["AGENTS_HOOK_LOG"] = str(hook_logs / "hooks.log")   # never this machine's log
 os.environ["GIT_CONFIG_GLOBAL"] = os.devnull   # every git a test runs, so this machine's core.hooksPath never fires a real review
+
+# after the environment, since hooks.LOG is read once, when `review` first imports it through `inject`
+from agentkit import agents, review, reviews
+from agentkit.backends import Reply
+from agentkit.session import Message, Session
 
 
 def git(directory: Path) -> Path:
@@ -52,9 +65,22 @@ def standard(directory: Path, name: str, applies: str = "", related: str = "", b
 
 def agent(args: list[str], cwd: Path, expect: int | None = 0, env: dict | None = None, stdin: str | None = None):
   """The CLI as a subprocess, which is the only way to test where someone is standing."""
-  result = subprocess.run([str(AGENT), *args], cwd=cwd, capture_output=True, check=False, text=True, input=stdin, env={**os.environ, **(env or {})})
+  result = subprocess.run([str(AGENT), *args], cwd=cwd, capture_output=True, check=False, text=True, input=stdin, env={**{key: value for key, value in os.environ.items() if key not in GITHUB}, **(env or {})})
   if expect is not None: assert result.returncode == expect, f"{args} in {cwd}\nout: {result.stdout}\nerr: {result.stderr}"
   return result
+
+
+def fake(parent: Path, monkeypatch, name: str, body: str) -> Path:
+  """A program `name` in `parent/fake`, first on PATH, that logs its name and arguments as one line, then runs `body` with that log in `$log`; returns the log, which every fake in `parent` shares.
+
+  The shebang names bash by its path, so a fake still runs when a test cuts PATH down to the fakes alone.
+  """
+  (directory := parent / "fake").mkdir(exist_ok=True)
+  log = directory / "calls.log"
+  (directory / name).write_text(f'#!/bin/bash\nlog={shlex.quote(str(log))}\nprintf "%s\\n" "{name} $*" >> "$log"\n{body}\n')
+  (directory / name).chmod(0o755)
+  if os.environ["PATH"].split(os.pathsep)[0] != str(directory): monkeypatch.setenv("PATH", f"{directory}{os.pathsep}{os.environ['PATH']}")
+  return log
 
 
 def checkout_home(directory: Path, **extra: str) -> dict:
@@ -82,6 +108,16 @@ def typed(command: list[str], answers: str, environment: dict, cwd: Path) -> tup
   return process.wait(), shown.decode(errors="replace")
 
 
+@contextmanager
+def locked(database: Path, timeout_seconds: float = 30):
+  """Another process holding duckdb's write lock on `database`, yielded once it says so; however the block ends, its stdin is closed, which lets go, and it is waited on."""
+  with subprocess.Popen([sys.executable, "-c", "import duckdb, sys; connection = duckdb.connect(sys.argv[1]); print('held', flush=True); sys.stdin.readline()", str(database)],
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True) as holder:   # leaving the with closes its pipes and waits
+    if not select.select([holder.stdout], [], [], timeout_seconds)[0]: holder.kill()   # silent past the timeout, so the read below meets its end rather than waiting on it
+    assert holder.stdout.readline() == "held\n", f"nothing held {database} within {timeout_seconds} seconds"
+    yield holder
+
+
 @pytest.fixture
 def repo(tmp_path) -> Path:
   """A git repo with a note at the root and a module to edit: what an injection test needs."""
@@ -95,7 +131,8 @@ def repo(tmp_path) -> Path:
 def wheel(tmp_path_factory) -> Path:
   """agentkit built from this checkout as a wheel, once per run."""
   out = tmp_path_factory.mktemp("wheel")
-  subprocess.run(["uv", "build", "--wheel", "--quiet", "--out-dir", str(out), str(REPO)], check=True, capture_output=True)
+  built = subprocess.run(["uv", "build", "--wheel", "--quiet", "--out-dir", str(out), str(REPO)], capture_output=True, check=False, text=True)
+  assert built.returncode == 0, built.stderr
   return next(out.glob("*.whl"))
 
 
@@ -103,8 +140,9 @@ def wheel(tmp_path_factory) -> Path:
 def installed(wheel, tmp_path_factory) -> Path:
   """The wheel installed into a venv of its own, as `uv tool install` would: the `bin` holding its `agent`."""
   venv = tmp_path_factory.mktemp("venv")
-  subprocess.run(["uv", "venv", "--quiet", "--python", sys.executable, str(venv)], check=True, capture_output=True)
-  subprocess.run(["uv", "pip", "install", "--quiet", "--python", str(venv / "bin" / "python"), str(wheel)], check=True, capture_output=True)
+  for command in (["uv", "venv", "--quiet", "--python", sys.executable, str(venv)], ["uv", "pip", "install", "--quiet", "--python", str(venv / "bin" / "python"), str(wheel)]):
+    ran = subprocess.run(command, capture_output=True, check=False, text=True)
+    assert ran.returncode == 0, ran.stderr
   return venv / "bin"
 
 
@@ -114,7 +152,7 @@ def machine(installed, tmp_path) -> dict:
 
   gh gets an empty config and no token, so nothing a test runs can reach this machine's GitHub account.
   """
-  return {key: value for key, value in os.environ.items() if key not in ("AGENTS_PROFILE", "AGENTS_HOOK_LOG", "PYTHONPATH", "CLAUDE_CONFIG_DIR", "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GH_HOST", "XDG_CONFIG_HOME")} | {"HOME": str(tmp_path / "home"), "TMPDIR": str(tmp_path), "GH_CONFIG_DIR": str(tmp_path / "gh"), "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@t.io", "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@t.io", "UV_TOOL_DIR": str(tmp_path / "tools"), "UV_TOOL_BIN_DIR": str(tmp_path / "bin"), "UV_CACHE_DIR": UV_CACHE, "UV_PYTHON": sys.executable, "PATH": os.pathsep.join([str(tmp_path / "bin"), str(installed), os.environ["PATH"]])}
+  return {key: value for key, value in os.environ.items() if key not in ("AGENTS_PROFILE", "AGENTS_HOOK_LOG", "PYTHONPATH", "CLAUDE_CONFIG_DIR", *GITHUB)} | {"HOME": str(tmp_path / "home"), "TMPDIR": str(tmp_path), "GH_CONFIG_DIR": str(tmp_path / "gh"), "GIT_AUTHOR_NAME": "T", "GIT_AUTHOR_EMAIL": "t@t.io", "GIT_COMMITTER_NAME": "T", "GIT_COMMITTER_EMAIL": "t@t.io", "UV_TOOL_DIR": str(tmp_path / "tools"), "UV_TOOL_BIN_DIR": str(tmp_path / "bin"), "UV_CACHE_DIR": UV_CACHE, "UV_PYTHON": sys.executable, "PATH": os.pathsep.join([str(tmp_path / "bin"), str(installed), os.environ["PATH"]])}
 
 
 @pytest.fixture
@@ -151,7 +189,7 @@ class Stub:
   def run(self, prompt, role="text", session=None, effort=None):
     self.shown.append(prompt)
     self.asked.append((role, effort))
-    time.sleep(0.4 if "SLOW" in prompt else 0.0)
+    time.sleep(0.4 if "SLOW" in prompt else 0.0)   # a prompt marked SLOW outlasts the quick ones, so a test can tell the order they finished in from the order they were asked
     reply = self.replies.pop(0) if self.replies else CLEAN
     if isinstance(reply, Exception): raise reply
     return Reply(json.dumps(reply))

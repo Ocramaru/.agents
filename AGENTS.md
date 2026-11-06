@@ -22,13 +22,13 @@ The [`agent-notes`](standards/agent-notes.md) standard covers this, and it loads
 
 ### How the notes reach you
 
-One `PreToolUse` hook resolves both the standards and the notes for a file and injects what has not already been sent this session. Only `context.md` loads automatically; `learned.md` and `todo.md` are named with their section maps so you can read one when you have a reason to. A `PostCompact` hook clears the stamps, since compaction can summarise the notes away while the stamps still claim they are in context.
+A `SessionStart` hook injects the notes for the directory the session starts in, from the repo root down. One `PreToolUse` hook then resolves both the standards and the notes for each file you edit and injects what has not already been sent this session. Only `context.md` loads automatically; `learned.md` and `todo.md` are named with their section maps so you can read one when you have a reason to. A `PostCompact` hook clears the stamps, since compaction can summarise the notes away while the stamps still claim they are in context.
 
 `/agents <path-or-topic>` and `/standards <file-or-topic>` load either on demand.
 
-The hook fires on the Edit and Write tools only. A file written through Bash (`sed`, a heredoc) gets nothing, so edit with the tools when a standard should apply.
+The edit hook fires on the Edit and Write tools, and on Read only where `[inject] read = true`. A file written through Bash (`sed`, a heredoc) gets nothing, so edit with the tools when a standard should apply.
 
-What the person sees: a one-line notice, `PreToolUse:Edit says: .agents loaded 2 standards, 1 note for <file>`, and only when something was delivered. Delivery is once per file per session, so a second edit to the same file shows no notice. That is the dedupe working, not the hook failing. Do not tell the person the hook is invisible, and do not send them to `claude --debug` or `/hooks`. `agent hooks --hook inject` lists every edit the hook saw: `sent` delivered, `quiet` already delivered this session, `none` nothing governs the file, `ERROR` the hook broke.
+What the person sees: a one-line notice, `PreToolUse:Edit says: .agents loaded 2 standards, 1 note for <file>`, and only when something was delivered. Delivery is once per file per session, so a second edit to the same file shows no notice. That is the dedupe working, not the hook failing. Do not tell the person the hook is invisible, and do not send them to `claude --debug` or `/hooks`. `agent hooks --hook inject` lists every edit the hook saw, and `--hook start` every session start: `sent` delivered, `quiet` already delivered this session, `none` nothing governs the file, `ERROR` the hook broke.
 
 When notes are injected, do not summarise them back at length. Say what is settled, what is still open, and anything that contradicts what you were about to do.
 
@@ -36,13 +36,19 @@ When notes are injected, do not summarise them back at length. Say what is settl
 
 Standards live once, in `~/.agents/standards`, one file per topic. Each declares in its frontmatter what it `applies` to and what it is `related` to. Editing a file loads the standards that govern it and everything those relate to, followed transitively: a training script pulls the run rules, which pull the Python rules, which pull the commit format.
 
+A dot in a name layers it on its family: `latex.robotics` always loads after `latex`. A family can share a folder named for it, `latex/latex.md` beside `latex/robotics.md`, and a member with no `applies` loads only where a directory's `[applies]` names it.
+
+<!-- standards: generated from each standard's description. Edit the description, not this; after a manual edit run `agent remap` here -->
+
 | | |
 |---|---|
-| [`markdown`](standards/markdown.md) | never hand-format: no hard-wrapped paragraphs, no space padding, tabular data in a table |
-| [`python`](standards/python.md) | run through the project's environment, never a whole-file formatter unasked, match the file |
-| [`shell`](standards/shell.md) | bash, `set -euo pipefail`, quote everything, dry-run and portable to macOS |
-| [`commits`](standards/commits.md) | subject then one-line bullets, no run numbers, no unrelated churn |
-| [`agent-notes`](standards/agent-notes.md) | what context, learned, todo and todo.archive each hold |
+| [`agent-notes`](standards/agent-notes.md) | How the .agents notes are written: what context, learned, todo and todo.archive each hold |
+| [`commits`](standards/commits.md) | Commit message format, and what never goes in one: subject then one-line bullets, no run numbers, no unrelated churn |
+| [`markdown`](standards/markdown.md) | How markdown is written here, never hand-formatted: no hard-wrapped paragraphs, no space padding, tabular data in a table |
+| [`python`](standards/python.md) | How Python is run, linted and laid out here: through the project's environment, never a whole-file formatter unasked, matching the file |
+| [`shell`](standards/shell.md) | How shell scripts are written, checked and laid out here: bash, `set -euo pipefail`, quote everything, dry-run and portable to macOS |
+
+<!-- /standards -->
 
 These are starters. Your own standards live in your profile — `~/.agents/profile/standards`, its own private repo — where one named like a starter replaces it and any other is added. `agent profile` says where yours is.
 
@@ -63,5 +69,7 @@ A standard narrows itself by section: a `##` heading that names a file, like `##
 ### Findings outlive sessions
 
 If a session establishes something that would have saved the session (a trap, a constraint, a measurement that misleads), write it into the nearest `learned.md` before finishing. That is the entire point of the convention, and it is the step most often skipped.
+
+Not into the agent's own memory, which only that project's sessions read: a fact about a place goes in that place's `.agents/`, and a rule for every repo in your profile. `agent profile review` says where each memory already saved belongs.
 
 When what was learned is about the tooling itself rather than the repo you are in (a command that is awkward, a hook that did nothing, a standard that contradicts itself), `agent issue "<one line>"` drafts it as an issue on the hub, since this repo's notes are the wrong place and nobody would read it there. It opens a prefilled page in the person's browser and prints the link to give them; nothing is filed until they submit it. A complaint already open points at that issue instead.

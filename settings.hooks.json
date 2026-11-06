@@ -1,4 +1,14 @@
 {
+  "SessionStart": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "$HOME/.agents/hooks/session-start.sh"
+        }
+      ]
+    }
+  ],
   "PreToolUse": [
     {
       "matcher": "Edit|Write|NotebookEdit",

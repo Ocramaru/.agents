@@ -6,6 +6,18 @@ kind: learned
 
 # Traps
 
+- **A module constant read from the environment is fixed by whichever import loads it first, and conftest's own imports come first.** `hooks.LOG` reads `AGENTS_HOOK_LOG` at import; conftest imported `review` before setting it, so once `inject` imported `hooks`, an in-process test that logged would have written to the live `~/.agents/.hooks.log`. conftest sets the environment before any agentkit import, and a test asserts `hooks.LOG` is the test's own log.
+
+- **A redirect inside a group whose stderr already goes to /dev/null cannot print.** A review was right that `wc -c < "$log" 2>/dev/null` opens the file before silencing stderr, but `hook_log`'s `{ … } 2>/dev/null` had already swallowed the message, so no test could tell the fix from the old code. Check the enclosing redirect before calling an inner one a visible bug.
+
+- **ruff's RUF007 fix for `zip(words[1:], words[2:])` is `pairwise(words)`, which is not the same.** It adds the pair `(words[0], words[1])`, so the guard would have taken `run` as a pre-commit hook id; the equivalent is `pairwise(words[1:])`, and ruff itself marks the fix unsafe. Read an unsafe fix before taking it.
+
+- **Assert that a setting takes effect, not where it was written.** The backend test checked that `codex` landed in the profile's config.toml while an older `local.toml` default still won, so it passed with that bug for as long as both existed. Asserting `load_backends()[1]` catches it.
+
+- **`**/name` in an exclude never matched a file at the repo root.** fnmatch needs the `/`, so config.toml's `**/uv.lock` and `**/package-lock.json` excluded only nested copies. `review.unread` also tries a glob without its `**/`, as `.gitignore` reads one.
+
+- **A read-only duckdb connect fails at once while another process holds the write lock** (`IOException: Conflicting lock is held`), and a catch-all read that as no history, so a manual review beside a hook's raised dismissed findings again. The reads a review depends on retry as writes do; a hook's reads try once and log a skip, so an edit never waits.
+
 - **The hub is itself a `.agents`, so a path glob for notes matches every `.md` in it.** notes-map's `*/.agents/*.md` sent `~/.agents/README.md` to `agent remap`, which refused it, and each edit logged an ERROR that `agent status` then reported. Only `notes.is_note` can tell; the hook passes `remap --if-note` and lets the CLI skip.
 
 - **A repo's own hooks are neither at `.git/hooks` nor where `--git-path hooks` says.** In a linked worktree `.git` is a file, so `agent hook install` failed with `NotADirectoryError`. `git rev-parse --git-path hooks/post-commit` follows `core.hooksPath`, which here names `~/.agents/githooks`, so `status` and `uninstall` would have looked there and a husky repo's hook would have been moved aside. Join `--git-common-dir` and `hooks/`, as `githooks/_dispatch` does.
@@ -18,7 +30,7 @@ kind: learned
 
 - **`NO_COLOR=1` does not make Rich plain.** It drops colour and keeps bold and dim, whose escape codes split `Answer (new):` into three pieces, so a pseudo-terminal test matching a phrase fails. `TERM=dumb` draws no codes at all; `typed()` sets both.
 
-- **A checkout's reviews belong to it, and only its dismissals travel.** Findings closed `--as wrong` in a worktree were unknown to `~/.agents`, whose next review of the same lines raised them again; the uv-install worktree alone held 54. A linked worktree writes `wrong` and `wontfix` closures to the main checkout's reviews as well, under the same id, and a review reads both. Open findings and `fixed` stay where they were made. A dismissal that never reached the main checkout's reviews, made before this or lost when the second write failed, is copied with `agent sub import <reviews> --root <main checkout>`.
+- **A checkout's reviews belong to it, and only its dismissals travel.** Findings closed `--as wrong` in a worktree were unknown to `~/.agents`, whose next review of the same lines raised them again; the uv-install worktree alone held 54. A linked worktree writes `wrong` and `wontfix` closures to the main checkout's reviews as well, under the same id, and a review reads both. Open findings and `fixed` stay where they were made. A dismissal that never reached the main checkout's reviews, made before this, is copied with `agent sub import <reviews> --root <main checkout>`; the main checkout's is written first, so a failed write closes nothing and closing again does both.
 
 - **A hook that exits 0 when its CLI fails hides a command that no longer exists.** doc-check.sh called `agent run` after `run` moved under `agent sub`, and `|| exit 0` with nothing logged made every opted-in session end look like a clean check. A hook that cannot run its CLI logs an ERROR with the last line the CLI printed.
 

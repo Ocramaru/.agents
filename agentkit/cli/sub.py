@@ -10,7 +10,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from agentkit import agents, backends, config, git, hooks, review, reviews
+from agentkit import agents, backends, config, git, hooks, review, reviews, tree, words
 from agentkit.command import GROUPS, arg, command
 from agentkit.cli import show
 from agentkit.cli.out import done, dump, escape, fail, line, note, say, table, took
@@ -62,7 +62,7 @@ def _missing_model(args, backend, roles) -> int:
 def cmd_run(args) -> int:
   definition = agents.definition(args.agent, agents.definitions())
   if missing := [path for path in args.paths if not Path(path).is_file()]: return fail(f"no such file: {', '.join(missing)}", 2)
-  body = agents.prompt([(path, Path(path).read_text(encoding="utf-8")) for path in args.paths], changed=args.changed)
+  body = agents.prompt([(path, Path(path).read_text(encoding="utf-8", errors="replace")) for path in args.paths], changed=args.changed)   # a byte that is not UTF-8 reads as one, not a traceback
   if not body: return fail("nothing to check: pass --changed or some files", 2)
 
   root = git.root(Path.cwd()) or Path.cwd()
@@ -131,7 +131,8 @@ def cmd_review(args) -> int:
   if args.recheck and args.commit: return fail("--recheck reads the reviews and --commit reads a commit; use one", 2)
   if args.recheck or args.commit:
     root = git.root(Path.cwd()) or Path.cwd()
-    touched = git.run(root, "diff-tree", "--no-commit-id", "--name-only", "-z", "-r", "--root", args.commit) if args.commit else None
+    merge = args.commit and len(git.run(root, "rev-list", "--parents", "-n1", args.commit).stdout.split()) > 2   # diff-tree prints nothing for a merge, so it is read against its first parent: what it brought in
+    touched = git.run(root, "diff-tree", "--name-only", "-z", "-r", *([f"{args.commit}^1", args.commit] if merge else ["--no-commit-id", "--root", args.commit])) if args.commit else None
     # NUL-separated: a whitespace split breaks a spaced path, and git quotes a non-ASCII one per line; a deleted file has nothing left to review
     if touched and touched.returncode: return fail(f"git could not read {args.commit}: {touched.stderr.strip()}", 2)
     files, roots = [path for name in touched.stdout.split("\0") if name and (path := root / name).is_file()] if touched else [], []
@@ -141,6 +142,9 @@ def cmd_review(args) -> int:
     if missing: return fail(f"no such path: {', '.join(str(path) for path in missing)}", 2)
     files = sorted(path.resolve() for path in given if path.is_file())
     roots = [path.resolve() for path in given if path.is_dir()]
+    # each repo keeps its own reviews, so paths from several would all land in the first one's
+    if len(repos := {git.root(path if path.is_dir() else path.parent): path for path in [*roots, *files]}) > 1:
+      return fail(f"paths from {words.count(len(repos), 'repo')}: {'; '.join(str(repo) if repo else f'{path}, in no repo' for repo, path in repos.items())}. Each repo keeps its own reviews, so review each on its own", 2)
     root = roots[0] if roots else (files[0].parent if files else Path.cwd())
     root = git.root(root) or root
 
@@ -159,11 +163,14 @@ def cmd_review(args) -> int:
       return fail(error, 2)
   if not names and not args.recheck:
     return fail("no agents to route to: set `agents` under [review] in config.toml", 2)
+  if whole := [name for name in names if name in found and found[name].get("scope")]:   # one conversation over everything it reads, which a review per file would split
+    return fail(f"{', '.join(whole)} reads the whole {found[whole[0]].get('scope')} at once, not file by file: agent {found[whole[0]].get('scope')} review", 2)
 
   # every route, not only discovery: a commit's file list and a named file arrive unfiltered
-  dropped = {file: ignored for file in files if (ignored := review.skipped(file, root))}
+  skip = tree.skipped(root)
+  dropped = {file: why for file in files if (why := review.unread(root, review.label(file, root), exclude, settings["max_bytes"], skip))}
   if dropped:
-    note(f"skipping {len(dropped)} file{'s' if len(dropped) != 1 else ''} under {', '.join(sorted({name for ignored in dropped.values() for name in ignored}))}")
+    for why, count in sorted(Counter(dropped.values()).items()): note(f"skipping {words.count(count, 'file')} {why}")
     files = [file for file in files if file not in dropped]
 
   if args.recheck and not args.paths and (here := _subfolder(root)):
@@ -174,7 +181,7 @@ def cmd_review(args) -> int:
   libraries = {}
   if args.recheck:   # each reviewer with the files it has something open on, narrowed to an agent or kind and to paths
     under = [Path(path).resolve() for path in args.paths]
-    plans = [(name, selected) for name, open_files in reviews.to_recheck(root).items() if args.agent in (review.AUTO, name, kind.get(name))
+    plans = [(name, selected) for name, open_files in reviews.to_recheck(root).items() if args.agent in (review.AUTO, name, kind.get(name)) and not (name in found and found[name].get("scope"))   # a whole review is rechecked by running it again
              if (selected := [root / file for file in open_files if not under or any((root / file).is_relative_to(folder) for folder in under)])]
   else:
     plans = review.plan(names, found, files, discovered, libraries, globs=args.glob, explicit=not args.commit)
@@ -184,7 +191,8 @@ def cmd_review(args) -> int:
     return 0
   if not plans:
     standards = Library()
-    return fail(f"nothing under {root} is governed by {', '.join(names)} ({"; ".join(f"{name} reads {', '.join(review.globs_of(agents.definition(name, found), standards)) or 'what its standards govern'}" for name in names)})", 2)
+    reads = "; ".join(f"{name} reads {', '.join(review.globs_of(agents.definition(name, found), standards)) or 'what its standards govern'}" for name in names)
+    return fail(f"nothing under {root} is governed by {', '.join(names)} ({reads})", 2)
 
   if not args.recheck:   # before --limit trims the plans, so a file it leaves out is not called one no standard covers
     _unreviewed(sorted((set(files) | set(discovered)) - {path for _, selected in plans for path in selected}), root)
@@ -198,10 +206,10 @@ def cmd_review(args) -> int:
   if args.dry:
     for name, selected in plans:
       line(f"{kind.get(name, name)} review · {name} ({agents.definition(name, found).get("model")})")
-      for file in selected: line(f"  {review.label(file, root)}")
+      for file in selected: line(words.indented(review.label(file, root)))
     return 0
 
-  if exclude and roots: note(f"excluding {', '.join(exclude)}")  # only discovery honours them
+  if exclude and roots: note(f"excluding {', '.join(exclude)}")  # discovery names no file it leaves out, so it names the excludes
   if (code := CliHelpers.ensure_backend(args.backend or settings.get("backend"))): return code
   backend = backends.get(args.backend or settings.get("backend"))   # a repo may keep its reviews local
   if (code := _missing_model(args, backend, {args.role or agents.definition(name, found).get("model") for name, _ in plans})): return code
@@ -209,7 +217,7 @@ def cmd_review(args) -> int:
   # what actually runs at once: plans go one after another, and the backend caps each of them
   at_once = min(jobs, backend.parallel, max(len(selected) for _, selected in plans))
   run = review.new_run()
-  note(f"run {run} · " + "; ".join(f"{name} over {len(selected)} file{'' if len(selected) == 1 else 's'}" for name, selected in plans)
+  note(f"run {run} · " + "; ".join(f"{name} over {words.count(len(selected), 'file')}" for name, selected in plans)
        + (f", {at_once} at a time" if at_once > 1 else ""))
 
   began = time.monotonic()
@@ -223,8 +231,9 @@ def _unreviewed(paths: list[Path], root: Path) -> None:
   relative = [Path(review.label(path, root)) for path in paths]
 
   listed = lambda counts: ", ".join(f"{name} {count}" for name, count in counts.most_common(4)) + (", …" if len(counts) > 4 else "")
-  note(f"not reviewed, no standard covers them: {len(paths)} file{'' if len(paths) == 1 else 's'} ({listed(Counter(path.suffix or path.name for path in relative))}) in {listed(Counter(f"{path.parent.as_posix()}/" if path.parent != Path(".") else "./" for path in relative))}")
-  note(f"  to review one anyway, name a reviewer: agent sub review logic {os.path.relpath(paths[0], Path.cwd())}")
+  kinds, folders = Counter(path.suffix or path.name for path in relative), Counter(f"{path.parent.as_posix()}/" if path.parent != Path(".") else "./" for path in relative)
+  note(f"not reviewed, no standard covers them: {words.count(len(paths), 'file')} ({listed(kinds)}) in {listed(folders)}")
+  note(words.indented(f"to review one anyway, name a reviewer: agent sub review logic {os.path.relpath(paths[0], Path.cwd())}"))
 
 
 def _subfolder(root: Path) -> str | None:
@@ -316,7 +325,7 @@ def cmd_import(args) -> int:
   added, already = reviews.adopt(Path(args.reviews), root)
   for closure in added:
     line(f"added {closure['file']}:{reviews.first_line(closure['line'])} as {closure['verdict']}  {' '.join(closure['issue'].split())[:70]}")
-  return done(f"{len(added)} dismissal{'' if len(added) == 1 else 's'} added to {reviews.path(root, create=False)}" + (f", {already} already there" if already else ""))
+  return done(f"{words.count(len(added), 'dismissal')} added to {reviews.path(root, create=False)}" + (f", {already} already there" if already else ""))
 
 
 @command("agents", help="the kinds of review there are, and what each reads", group="sub", default=True)
@@ -326,8 +335,10 @@ def cmd_agents(args) -> int:
   for kind, names in sorted(agents.kinds(found).items()):
     for name in names:
       definition = found[name]
-      role = definition.get("model")
-      rows.append([escape(kind), escape(name), f"{escape((backend.spec.get("models", {}).get(role, "none") if backend else "none").removeprefix("claude-"))}\n[dim]{escape(role)}[/dim]", escape(", ".join(review.globs_of(definition, standards)) or "anything named"), escape((definition.get("description") or "").split(". ", 1)[-1])])   # the model that runs, not only its role
+      role, scope = definition.get("model"), definition.get("scope")
+      model = (backend.spec.get("models", {}).get(role, "none") if backend else "none").removeprefix("claude-")   # the model that runs, not only its role
+      reads = f"the whole {scope} at once: agent {scope} review" if scope else ", ".join(review.globs_of(definition, standards)) or "anything named"
+      rows.append([escape(kind), escape(name), f"{escape(model)}\n[dim]{escape(role)}[/dim]", escape(reads), escape((definition.get("description") or "").split(". ", 1)[-1])])
 
   return table(["kind", "agent", "model", "reads", "looks for"], rows,
                title=f"Review types on {backend.name}" if backend else "Review types, with no default backend set",
@@ -354,7 +365,7 @@ def _fan_out(plans, backend, root: Path, jobs: int, want_role: str | None, found
   total, finished, lock = sum(len(selected) for _, selected in plans), [0], threading.Lock()
   out = sys.stdout if mode == "text" else sys.stderr     # --jsonl keeps stdout for data
 
-  def started(relative): say(f"  [dim]… {escape(relative)}[/dim]", sys.stderr)   # out keeps each line whole
+  def started(relative): say(words.indented(f"[dim]… {escape(relative)}[/dim]"), sys.stderr)   # out keeps each line whole
 
   def tick(outcome):
     with lock:   # a result is several lines, printed together with its count
@@ -369,8 +380,7 @@ def _fan_out(plans, backend, root: Path, jobs: int, want_role: str | None, found
       used.append(role)
 
       # print what is about to be slow before it starts, so a long silence does not look like a hang
-      note(f"  {kind.get(name, name)} review ({name}) on {backend.name}/{backend.model_for(role)}, "
-           f"started {time.strftime('%H:%M:%S')}, up to {backend.timeout}s a file")
+      note(words.indented(f"{kind.get(name, name)} review ({name}) on {backend.name}/{backend.model_for(role)}, started {time.strftime('%H:%M:%S')}, up to {backend.timeout}s a file"))
       results += review.run(name, backend, selected, root, definition, libraries, role=role, jobs=jobs, on_start=started,
                             on_done=tick, run=run, effort=effort, fresh=fresh)
     return results
@@ -387,12 +397,12 @@ def _report_review(root: Path, results: list, run: str, seconds: float) -> int:
 
   failed, finding_count = by_bucket.get("failed", []), sum(len(outcome["findings"]) for outcome in by_bucket.get("found", []))
 
-  say(f"\n[bold]{len(results)} file{'s' if len(results) != 1 else ''} in {took(seconds)}:[/bold] "
-            + ", ".join([f"{len(by_bucket[bucket])} {phrase}" for bucket, phrase in {"clean": "clean", "found": f"with {finding_count} finding{'s' if finding_count != 1 else ''}", "asked": "asked", "failed": "failed", "empty": "empty", "unchanged": "unchanged, not asked again (--fresh to)"}.items() if by_bucket.get(bucket)]), sys.stderr)
+  phrases = {"clean": "clean", "found": f"with {words.count(finding_count, 'finding')}", "asked": "asked", "failed": "failed", "empty": "empty", "unchanged": "unchanged, not asked again (--fresh to)"}
+  tally = ", ".join(f"{len(by_bucket[bucket])} {phrase}" for bucket, phrase in phrases.items() if by_bucket.get(bucket))
+  say(f"\n[bold]{words.count(len(results), 'file')} in {took(seconds)}:[/bold] {tally}", sys.stderr)
   say(f"[dim]again: agent sub reviews --run {run}   ·   still open: agent sub reviews --open[/dim]", sys.stderr)
 
   if os.environ.get("AGENTS_HOOK"):   # started by a git hook that has already returned, so the outcome goes to the hook log
     hooks.log(os.environ["AGENTS_HOOK"], "git",
-                f"done   {root.name}: {finding_count} findings in {len(results)} reviews"
-                f"{f', {len(failed)} failed' if failed else ''}  (agent sub reviews --run {run})")
+                f"done   {root.name}: {finding_count} findings in {len(results)} reviews" + (f", {len(failed)} failed" if failed else "") + f"  (agent sub reviews --run {run})")
   return 1 if failed else 0   # a review that could not run is not a clean one; a script has to see it

@@ -72,6 +72,8 @@ agent profile
 
 `update` pulls the latest `.agents` and your profile; a pull that would have to merge stops and says so. `agent profile` shows where yours is and what is in it, and `agent doctor` warns when it has work another machine would miss: an uncommitted edit, a commit not pushed, or no remote at all. `agent profile use <dir-or-url>` switches to a different one.
 
+`agent profile review` reads the whole profile in one conversation, with the starters it replaces, every repo's `.agents/standards/` it can find from where Claude Code has run, and Claude's own auto memory under `~/.claude/projects/*/memory/`. It reports rules that contradict, repeat or sit in the wrong place, and for each memory the `.agents` note or profile file it belongs in. Its findings land in the profile's reviews, so `agent sub reviews --open --root ~/.agents/profile` and `agent sub close` work on them; `--dry-run` lists what it would read.
+
 Tests never see your profile: the suite sets `AGENTS_PROFILE` empty, which means none. The same variable pointed at a directory overrides `local.toml` for one shell.
 
 ## Reviewing
@@ -103,7 +105,7 @@ agent sub reviews --failed --agent logic
 | [`AGENTS.md`](AGENTS.md) | the convention: `.agents/` notes, standards, how they load |
 | [`standards/`](standards) | the starters, one file per topic, each declaring what it `applies` to and what it is `related` to |
 | [`agents/`](agents) | reviewer definitions, each naming the standards it judges against |
-| [`hooks/`](hooks) | `inject` and `forget`, the reformatter guard, the notes remapper, and the gate that skips a repeated question |
+| [`hooks/`](hooks) | `session-start`, `inject` and `forget`, the reformatter guard, the notes remapper, and the gate that skips a repeated question |
 | [`commands/`](commands) | `/agents` and `/standards`, for loading on demand |
 | `settings.hooks.json` | the hooks block `agent install` writes into Claude Code's settings |
 | [`githooks/`](githooks) | one dispatcher under every git hook name, for `agent hook install --global` |
@@ -112,7 +114,7 @@ agent sub reviews --failed --agent logic
 
 ## What each agent gets
 
-Claude Code is the only one with a hook system, so it gets the full thing: standards inject themselves when you edit a file they govern, `.agents/` notes inject themselves when you edit a file near them, and a `PreToolUse` guard, once `[guard]` turns it on, refuses to run a whole-file formatter.
+Claude Code is the only one with a hook system, so it gets the full thing: the `.agents/` notes for where a session starts arrive when it starts, standards inject themselves when you edit a file they govern, `.agents/` notes inject themselves when you edit a file near them, and a `PreToolUse` guard, once `[guard]` turns it on, refuses to run a whole-file formatter. `[inject] read = true` makes opening a file with Read do what editing it does; it ships off, since most of what it adds goes to sessions that never edit.
 
 Codex and Gemini have a global instructions file and no hooks. They get the pointer to `AGENTS.md` and nothing auto-injects, which is why `AGENTS.md` carries a one-line summary of each standard rather than only links.
 
@@ -126,7 +128,7 @@ agent doctor
 env -u PYTHONPATH uv run pytest tests/
 ```
 
-`status` describes this machine on one screen and never fails: the version and whether it is a clone or an install, the profile and what it has not pushed, the default backend and the role each reviewer asks for, the standards and notes in force where you stand, the open findings there, and whether the hooks are wired. At a terminal what wants a look is yellow and what is broken red; piped, it is plain text with the part named on every line.
+`status` describes this machine on one screen and never fails: the version and whether it is a clone or an install, the profile and what it has not pushed, the default backend and the role each reviewer asks for, the standards and notes in force where you stand, the open findings there, how many of Claude's auto memories are waiting to move into `.agents` or the profile, and whether the hooks are wired. At a terminal what wants a look is yellow and what is broken red; piped, it is plain text with the part named on every line.
 
 `doctor` judges, and covers what tests cannot: whether the hooks are registered here and an install's copies of them are current, whether `agent` on PATH is this install or clone, whether a standard points at one that was renamed, whether a backend's CLI is installed, whether a note's map has drifted, and whether your profile is pushed. The suite runs only against temporary trees, so it never touches your install or your profile.
 

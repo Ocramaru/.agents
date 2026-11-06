@@ -2,17 +2,20 @@
 
 import re
 import sys
+import tomllib
 from pathlib import Path
 
-from agentkit import backends, doctor, gh, git, hub, install, issue, profile, status
+from agentkit import backends, doctor, gh, git, hub, install, issue, profile, status, words
 from agentkit.command import arg, command
 from agentkit.cli.out import done, escape, fail, line, say
 from agentkit.cli.utilities import CliHelpers
 
+UNPARSED = "a config.toml or local.toml does not parse, so the backends cannot be read: {error}; `agent doctor` names the file"   # what install says in place of a traceback
+
 
 def show(changes: bool, *lines: str, failed: bool = False) -> int:
   """Print `lines`; under `changes` only those that changed something or failed, or every one when the step `failed`."""
-  return done(*(text for text in lines if failed or not changes or text.strip().partition(" ")[0] in (*install.CHANGED, "FAIL")))
+  return done(*(text for text in lines if failed or not changes or text.strip().partition(" ")[0] in (*words.CHANGED, "FAIL")))
 
 
 @command("install", help="wire .agents into the agents on this machine")
@@ -22,16 +25,19 @@ def show(changes: bool, *lines: str, failed: bool = False) -> int:
 @arg("--backend", metavar="NAME", help="what reviews run on, as `agent sub backends` lists them (default: ask, given a terminal, when none is set)")
 @arg("--changes", action="store_true", help="print only the lines that changed something, and any failure")
 def cmd_install(args) -> int:
-  if args.backend and args.backend not in (known := backends.load_backends()[0]): return fail(f"there is no backend called {args.backend}; known: {', '.join(known)}", 2)
+  try: known = backends.load_backends()[0] if args.backend else {}
+  except tomllib.TOMLDecodeError as error: return fail(UNPARSED.format(error=error))
+  if args.backend and args.backend not in known: return fail(f"there is no backend called {args.backend}; known: {', '.join(known)}", 2)
   code, kept = install.keep(args.profile)
   if code: return fail(kept)
   if kept:   # the tool does the install, so the hooks copied are the ones it will keep
-    line(f"keep  agentkit as a uv tool: {kept}")
+    line(words.status("keep", f"agentkit as a uv tool: {kept}"))
     install.hand_over(kept)
 
   answer = args.profile
   if answer is None and profile.unasked() and CliHelpers.at_terminal() and gh.login():   # once, as every answer is recorded; a profile wants a private GitHub repo, so the question waits for gh
     answer = CliHelpers.ask("No profile on this machine. A profile is your own private repo of standards and settings, layered over the starters.", {"new": f"make one at {install.home(profile.DEFAULT)}", "URL": "clone yours, made on another machine", "DIR": "use a directory where it is", "none": "use the starters, and stop asking"}, default="new", free=True)
+    if answer in ("URL", "DIR"): answer = CliHelpers.ask("The URL to clone your profile from" if answer == "URL" else "The directory your profile is in")   # those two rows name a kind of answer, not one; nothing typed leaves the question for next time
 
   code, lines = install.run(args.targets, create=args.all, profile=answer)
   show(args.changes, *lines, failed=code != 0)
@@ -43,8 +49,9 @@ def cmd_install(args) -> int:
     if not profile.published():
       show(args.changes, "", "Push your profile somewhere private, so your other machines get it:", f"  git -C {profile.DEFAULT} remote add origin git@github.com:{login or '<you>'}/.agents.profile.git", f"  git -C {profile.DEFAULT} push -u origin main")
 
-  if args.backend: show(args.changes, "", "backend", f"  set   default = {args.backend} in {install.home(backends.choose(args.backend))}")
-  default = args.backend or backends.load_backends()[1]   # read once, so the closing hint reflects what was just chosen
+  if args.backend: show(args.changes, "", "backend", words.status("set", f"default = {args.backend} in {install.home(backends.choose(args.backend))}", words.UNDER))
+  try: default = args.backend or backends.load_backends()[1]   # read once, so the closing hint reflects what was just chosen
+  except tomllib.TOMLDecodeError as error: return fail(UNPARSED.format(error=error))
   if not default: default = CliHelpers.ask_backend()
 
   return show(args.changes,
@@ -64,17 +71,21 @@ def cmd_update(args) -> int:
     bad += code
     done(*lines)
 
-  for name, where in ((".agents", None if hub.INSTALLED else hub.BUNDLED), ("profile", profile.path())):
-    if name == ".agents" and where is None: continue
+  for name, where in ((hub.AGENTS_DIR, None if hub.INSTALLED else hub.BUNDLED), ("profile", profile.path())):
+    if name == hub.AGENTS_DIR and where is None: continue
     if where is None or not (where / ".git").exists():
-      line(f"skip   {name}: {'not a git repo' if where else 'none set'}")
+      line(words.status("skip", f"{name}: {'not a git repo' if where else 'none set'}"))
       continue
 
     pulled, said = git.pull(where)
     bad += not pulled
-    line(f"ok     {name}: {said}  ({where})" if pulled else f"FAIL   {name}: {said}  ({where})")
+    line(words.status("ok" if pulled else "FAIL", f"{name}: {said}  ({where})"))
 
-  if not hub.INSTALLED and (now := hub.version()) != was: line(f"       agentkit {was} -> {now}")
+  if not hub.INSTALLED and (now := hub.version()) != was: line(words.indented(f"agentkit {was} -> {now}", words.STATUS))
+  try:
+    known, default = backends.load_backends()   # nothing records one unasked, so a machine that never chose hears it here
+    if not default: line(words.status("note", f"{backends.HEADLESS}: `agent install --backend <{'|'.join(known)}>`"))
+  except tomllib.TOMLDecodeError as error: line(words.status("note", UNPARSED.format(error=error)))
   return 1 if bad else 0
 
 
@@ -94,7 +105,7 @@ def cmd_issue(args) -> int:
   return done(issue.draft(args.title, args.body, Path.cwd(), repo, dry=args.dry, context=args.context))
 
 
-@command("status", help="what this machine has: the install, profile, backend, standards, notes, findings and hooks")
+@command("status", help="what this machine has: the install, profile, backend, standards, notes, findings, memory waiting and hooks")
 def cmd_status(args) -> int:
   """Each part and what it is, at a terminal with the part named once and coloured, its detail dimmed and its level in yellow or red; piped, plain with the part on every line, for grep."""
   rows = status.rows()
@@ -110,4 +121,4 @@ def cmd_status(args) -> int:
 def cmd_doctor(args) -> int:
   results = doctor.checks()
   bad = sum(not ok for ok, _, _ in results)
-  return done(*(f"  ok    {what}" if ok else f"  FAIL  {what}\n        -> {fix}" for ok, what, fix in results), "", f"{len(results) - bad}/{len(results)} ok" + (f", {bad} to fix" if bad else ""), code=1 if bad else 0)
+  return done(*(words.status("ok", what, words.UNDER) if ok else words.status("FAIL", f"{what}\n-> {fix}", words.UNDER) for ok, what, fix in results), "", f"{len(results) - bad}/{len(results)} ok" + (f", {bad} to fix" if bad else ""), code=1 if bad else 0)

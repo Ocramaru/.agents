@@ -1,12 +1,18 @@
 """`CliHelpers.ask` run through a real pseudo-terminal, since whether it asks and what it draws depend on there being one, then the commands that lean on it: `install --changes`, `update` and a review with no backend."""
 
-import ast, os, re, shlex, sys, tomllib
+import argparse
+import ast
+import os
+import re
+import shlex
+import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 from conftest import REPO, typed
 
-from agentkit import backends, git, hub, install, profile
+from agentkit import backends, git, hub, install, profile, words
 from agentkit.cli import setup
 from agentkit.cli.utilities import CliHelpers
 
@@ -128,17 +134,28 @@ LINES = ["hooks", "  copy  2 files into .agents", "  ok    .agents -> /x", "  FA
 
 
 def test_changes_keeps_the_lines_that_changed_something_or_failed_and_a_failed_step_keeps_all(capsys):
-  """Plain, every line prints; under changes only those whose first word is in install.CHANGED or FAIL, unless the step failed."""
+  """Plain, every line prints; under changes only those whose first word is in words.CHANGED or FAIL, unless the step failed."""
   assert setup.show(False, *LINES) == 0
   assert capsys.readouterr().out == "\n".join(LINES) + "\n"
   assert setup.show(True, *LINES) == 0
   assert capsys.readouterr().out == "  copy  2 files into .agents\n  FAIL  gh said no\n"
-  setup.show(True, *LINES, failed=True)
+  assert setup.show(True, *LINES, failed=True) == 0
   assert capsys.readouterr().out == "\n".join(LINES) + "\n"
 
 
+def test_every_status_word_says_whether_its_line_changed_something():
+  """Each word `words.status` is given anywhere in agentkit is a literal, or a choice of literals, in words.CHANGED or words.UNCHANGED, so `install --changes` knows whether to keep its line; no word is in both, and none is wider than the column it is padded to."""
+  given = lambda node: [word for branch in (node.body, node.orelse) for word in given(branch)] if isinstance(node, ast.IfExp) else [node.value if isinstance(node, ast.Constant) else ast.unparse(node)]
+  used = {(path.name, word) for path in (REPO / "agentkit").rglob("*.py") for call in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+          if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr == "status" and isinstance(call.func.value, ast.Name) and call.func.value.id == "words"
+          for word in given(call.args[0])}
+  assert used and {(name, word) for name, word in used if word not in (*words.CHANGED, *words.UNCHANGED)} == set()
+  assert set(words.CHANGED).isdisjoint(words.UNCHANGED)
+  assert [word for word in (*words.CHANGED, *words.UNCHANGED) if len(word) >= words.STATUS] == []
+
+
 def test_install_changes_prints_only_what_changed_and_still_does_all_the_work(fresh, machine):
-  """The first install under --changes prints its copies, links, writes and pointers and no other line; a second prints nothing, a stale copy one line, and --backend the default it set."""
+  """The first install under --changes prints its copies, links, writes and pointers and no other line; a second prints nothing, an edited copy the backup and the copy, and --backend the default it set."""
   home = Path(machine["HOME"])
   (home / ".claude").mkdir(parents=True)
   first = {text.split()[0] for text in fresh(["install", "--changes"]).stdout.splitlines()}
@@ -149,7 +166,7 @@ def test_install_changes_prints_only_what_changed_and_still_does_all_the_work(fr
   assert fresh(["install", "--changes"]).stdout == ""
 
   (home / ".agents" / "hooks" / "inject.sh").write_text("stale\n")
-  assert fresh(["install", "--changes"]).stdout.splitlines() == ["  copy  1 file into .agents"]
+  assert fresh(["install", "--changes"]).stdout.splitlines() == ["  saved .agents/hooks/inject.sh.bak, which the last install did not leave there", "  copy  1 file into .agents"]
 
   assert fresh(["install", "--changes", "--backend", "codex"]).stdout.splitlines() == ["  set   default = codex in .agents/local.toml"]
   assert tomllib.loads((home / ".agents" / "local.toml").read_text())["backends"]["default"] == "codex"
@@ -181,10 +198,10 @@ def test_install_changes_still_shows_a_publish_that_failed_and_hides_the_hints_a
 
 
 @pytest.mark.parametrize("an_install, pulls, code, said", [
-  (False, (True, "pulled 2 commits"), 0, ["ok     .agents: pulled 2 commits  (HUB)", "skip   profile: none set"]),
-  (False, (True, "already current"), 0, ["ok     .agents: already current  (HUB)", "skip   profile: none set"]),
-  (False, (False, "cannot pull"), 1, ["FAIL   .agents: cannot pull  (HUB)", "skip   profile: none set"]),
-  (True, None, 1, ["FAIL   .agents: uv said nothing", "skip   profile: none set"]),
+  (False, (True, "pulled 2 commits"), 0, ["ok    .agents: pulled 2 commits  (HUB)", "skip  profile: none set"]),
+  (False, (True, "already current"), 0, ["ok    .agents: already current  (HUB)", "skip  profile: none set"]),
+  (False, (False, "cannot pull"), 1, ["FAIL  .agents: cannot pull  (HUB)", "skip  profile: none set"]),
+  (True, None, 1, ["FAIL  .agents: uv said nothing", "skip  profile: none set"]),
 ], ids=["pulled", "current", "failed", "installed"])
 def test_update_prints_what_the_upgrade_and_each_pull_said_and_fails_if_any_did(an_install, pulls, code, said, tmp_path, monkeypatch, capsys):
   """An install is upgraded through install.upgrade and a clone pulled through git.pull; each line reads `ok` or `FAIL`, then the name, what happened and where, and any failure is exit 1."""
@@ -193,20 +210,48 @@ def test_update_prints_what_the_upgrade_and_each_pull_said_and_fails_if_any_did(
   monkeypatch.setattr(hub, "INSTALLED", an_install)
   monkeypatch.setattr(hub, "BUNDLED", hub_dir)
   monkeypatch.setattr(profile, "path", lambda: None)
-  monkeypatch.setattr(install, "upgrade", lambda: (1, ["FAIL   .agents: uv said nothing"]))
+  monkeypatch.setattr(install, "upgrade", lambda: (1, ["FAIL  .agents: uv said nothing"]))
   monkeypatch.setattr(git, "pull", lambda where: pulls)
+  monkeypatch.setattr(backends, "load_backends", lambda: ({"alpha": None}, "alpha"))
   assert setup.cmd_update(None) == code
   assert capsys.readouterr().out.splitlines() == [text.replace("HUB", str(hub_dir)) for text in said]
 
 
 def test_update_skips_a_hub_or_profile_that_is_not_a_git_repo(tmp_path, monkeypatch, capsys):
-  """A clone or profile with no .git is skipped by name, and skipping is not failing."""
+  """A clone or profile with no .git is skipped by name, and skipping is not failing; with no default backend it says headless reviews cannot run, and how to set one, without failing."""
   (tmp_path / "not-git").mkdir()
   monkeypatch.setattr(hub, "INSTALLED", False)
   monkeypatch.setattr(hub, "BUNDLED", tmp_path / "not-git")
   monkeypatch.setattr(profile, "path", lambda: tmp_path / "also-not")
+  monkeypatch.setattr(backends, "load_backends", lambda: ({"alpha": None, "beta": None}, ""))
   assert setup.cmd_update(None) == 0
-  assert capsys.readouterr().out.splitlines() == ["skip   .agents: not a git repo", "skip   profile: not a git repo"]
+  assert capsys.readouterr().out.splitlines() == ["skip  .agents: not a git repo", "skip  profile: not a git repo", f"note  {backends.HEADLESS}: `agent install --backend <alpha|beta>`"]
+
+
+def test_update_says_a_config_that_does_not_parse_leaves_the_default_backend_unknown(tmp_path, monkeypatch, capsys):
+  """A hand-edited config that does not parse is a note at the end of update, not a traceback, and the pulls before it still count."""
+  (tmp_path / "not-git").mkdir()
+  (broken := tmp_path / "config.toml").write_text("[backends\ndefault = ")
+  monkeypatch.setattr(hub, "INSTALLED", False)
+  monkeypatch.setattr(hub, "BUNDLED", tmp_path / "not-git")
+  monkeypatch.setattr(hub, "CONFIG", broken)
+  monkeypatch.setattr(profile, "path", lambda: None)
+  assert setup.cmd_update(None) == 0
+  said = capsys.readouterr().out.splitlines()[-1]
+  assert said.startswith("note  a config.toml or local.toml does not parse, so the backends cannot be read: ") and said.endswith("; `agent doctor` names the file")
+
+
+@pytest.mark.parametrize("backend", ["claude", None], ids=["named", "read after the install"])
+def test_install_fails_in_one_line_on_a_config_that_does_not_parse(backend, tmp_path, monkeypatch, capsys):
+  """A hand-edited config that does not parse fails install with one line naming it and exit 1, whether the backend is checked before the install or read after it."""
+  (broken := tmp_path / "config.toml").write_text("[backends\ndefault = ")
+  monkeypatch.setattr(hub, "CONFIG", broken)
+  monkeypatch.setattr(install, "keep", lambda profile=None: (0, ""))
+  monkeypatch.setattr(install, "run", lambda targets, create=False, profile=None: (0, []))
+  monkeypatch.setattr(profile, "unasked", lambda: False)
+  assert setup.cmd_install(argparse.Namespace(backend=backend, profile=None, targets=[], all=False, changes=False)) == 1
+  said = capsys.readouterr().err.strip().splitlines()
+  assert len(said) == 1 and said[0].startswith("a config.toml or local.toml does not parse, so the backends cannot be read: ") and said[0].endswith("; `agent doctor` names the file")
 
 
 def test_a_review_with_no_default_backend_fails_naming_what_is_unset_and_how_to_set_one(monkeypatch, capsys):

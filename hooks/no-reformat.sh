@@ -9,15 +9,15 @@ command=$(printf '%s' "$payload" | jq -r '.tool_input.command // empty')
 session=$(printf '%s' "$payload" | jq -r '.session_id // "nosession"')
 [[ -n "$command" ]] || exit 0
 
-err=$(mktemp) && trap 'rm -f "$err"' EXIT
-rc=0
-found=$("$AGENTS_CLI" guard "$command" 2>"$err") || rc=$?
-if [[ "$rc" -eq 0 ]]; then
+stderr_file=$(mktemp) && trap 'rm -f "$stderr_file"' EXIT
+exit_code=0
+found=$("$AGENTS_CLI" guard "$command" 2>"$stderr_file") || exit_code=$?
+if [[ "$exit_code" -eq 0 ]]; then
   hook_log no-reformat "$session" "allow  $(printf '%s' "$command" | head -c 80 | tr '\n' ' ')"
   exit 0
 fi
 if [[ -z "$found" ]]; then
-  hook_log no-reformat "$session" "ERROR  guard would not run, allowing rc=$rc $(tail -n 1 "$err" | cut -c1-200)"
+  hook_log no-reformat "$session" "ERROR  guard would not run, allowing rc=$exit_code $(tail -n 1 "$stderr_file" | cut -c1-200)"
   exit 0
 fi
 

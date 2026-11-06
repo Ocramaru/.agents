@@ -6,6 +6,10 @@ kind: learned
 
 # Settled
 
+- **Read in the inject matcher costs text, not time, and the text mostly goes to sessions that never edit.** Replaying the Reads and edits of 197 transcripts whose files still exist through `inject.payload`: Read on sends 2,244k characters against 1,698k (+32%), a median of nothing extra per session, 8.4k at the 90th percentile, 31k at most; 89 sessions get more, and 44 that never edit get standards for files they only opened. The extra is 223k of standards, 286k of notes, 33k of mentions. Time is small: the first Read of a path costs a Python start (127 to 149 ms in a clone), a repeat is gated in 8 to 10 ms, and a session reads a median of 2 files it never edits (p90 8). So `[inject] read` ships off, and `SessionStart` carries the notes for where a session starts.
+
+- **Claude Code names a project folder by its path with every character but a letter or digit made `-`.** `/home/me/.agents/my_repo` and `/home/me/-agents/my/repo` are the same folder name, so no string replace decodes one. `memory.place` walks down from `/`, keeping the children whose flattened path the name still starts with; a folder whose directory is gone has none.
+
 - **A dismissal travels as its closure row alone.** A closure carries the file, line, issue and reason a reviewer is shown, and `dismissals` joins it to nothing. Copying the finding's review as well would make it the newest verdict for its task in the main checkout, superseding that checkout's own open findings, and a finding without its review joins to nothing and shows nowhere. One id in both checkouts' reviews is what lets a review read a dismissal once and `agent sub import` skip what is already there.
 
 - **`git rev-parse --git-dir --git-common-dir` differ only in a linked worktree.** Its common dir is the main checkout's `.git`, except for a bare repo's worktree (common dir `x.git`, or a bare repo kept in `.git`, which has no work tree) and a submodule's (`.git/modules/x`), which have no main checkout. From a subdirectory of a main checkout git prints the common dir relative, `../.git`, so it is resolved against the directory asked about.

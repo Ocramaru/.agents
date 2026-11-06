@@ -2,7 +2,13 @@
 No test runs `gh` or a browser; the calls are recorded and the assertions are about what was asked of them.
 """
 
-import argparse, json, platform, socket, subprocess, urllib.parse, webbrowser
+import argparse
+import json
+import platform
+import socket
+import subprocess
+import urllib.parse
+import webbrowser
 
 import pytest
 from conftest import git
@@ -85,7 +91,8 @@ def test_the_draft_names_the_commit_and_nothing_private_unless_asked(gh, browser
   assert "met in project" in asked and socket.gethostname() in asked
   assert "met in project" in sent(asked)["body"] and socket.gethostname() in sent(asked)["body"]
   (outside := elsewhere.parent / "not-a-repo").mkdir()
-  assert "met in not-a-repo · " in issue.draft("t", "", outside, HUB, context=True) and str(outside.parent) not in issue.draft("t", "", outside, HUB, context=True)   # a folder's name, never its path
+  drafted = issue.draft("t", "", outside, HUB, context=True)
+  assert "met in not-a-repo · " in drafted and str(outside.parent) not in drafted   # a folder's name, never its path
 
 
 def test_an_open_issue_with_the_same_title_opens_that_issue_and_prints_the_body_to_paste(gh, browser, elsewhere):
@@ -183,7 +190,7 @@ def test_the_listing_counts_replies_and_an_unreadable_list_is_a_message(gh, monk
 @pytest.mark.parametrize("returncode, passes", [(0, True), (1, False)])
 def test_doctor_checks_gh_for_the_duplicate_lookup_and_the_listing(monkeypatch, returncode, passes):
   """The gh check passes when gh is logged in and fails when it is not, and it names what gh is still for."""
-  monkeypatch.setattr(doctor.shutil, "which", lambda name: f"/usr/bin/{name}")
+  monkeypatch.setattr(doctor.shutil, "which", lambda name, **options: f"/usr/bin/{name}")
   monkeypatch.setattr(agentkit_gh, "run", lambda *args: subprocess.CompletedProcess(args, returncode, "", ""))
   (passed, label, fix), = [check for check in doctor.checks() if "gh authenticated" in check[1]]
   assert passed == passes and "find an issue already filed" in label and "--list" in fix and "reach the hub" not in label

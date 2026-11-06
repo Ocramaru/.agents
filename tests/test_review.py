@@ -6,7 +6,7 @@ import urllib.error
 from types import SimpleNamespace
 
 import pytest
-from conftest import Stub, findings, git, note, put, standard
+from conftest import Stub, fake, findings, git, note, put, standard
 
 from agentkit import agents as ag, backends, cli, hub, review, reviews, session
 from agentkit.backends import Backend, Reply, _fill
@@ -15,8 +15,8 @@ from agentkit.session import Message, Session
 from agentkit.standards import Library
 
 
-def test_a_backend_fills_its_argv_once_and_finds_its_reply_in_whatever_it_printed(monkeypatch):
-  """A payload survives substitution verbatim, the reply is found around noise, stdin is closed and a role resolves exactly."""
+def test_a_backend_fills_its_argv_once_and_finds_its_reply_in_whatever_it_printed(monkeypatch, tmp_path):
+  """A payload survives substitution verbatim, the reply is found around noise, stdin is closed, the reviewer is marked and a role resolves exactly."""
   prompt = 'review a.replace("{session}", x) and {model}'
   filled = _fill(["c", "-p", "{prompt}", "-m", "{model}", "-r", "{session}"], {"model": "haiku", "prompt": prompt, "session": "abc"})
   assert filled[2] == prompt and filled[4] == "haiku" and filled[6] == "abc"
@@ -26,13 +26,10 @@ def test_a_backend_fills_its_argv_once_and_finds_its_reply_in_whatever_it_printe
   assert Backend("codex", {"kind": "cli", "format": "jsonl", "resume_argv": ["x"], "session_key": "thread_id", "reply_key": "item.text"})._unwrap("\n".join(json.dumps(event) for event in events), None) == Reply("OK", "t-1")
   assert Backend("claude", {"kind": "cli", "format": "json", "session_key": "session_id", "reply_key": "result"})._unwrap('warning: something\n{"session_id": "s-1", "result": "done"}', None) == Reply("done", "s-1")
 
-  seen = []
-  monkeypatch.setattr(backends.subprocess, "run", lambda argv, **kwargs: seen.append((argv, kwargs)) or subprocess.CompletedProcess(argv, 0, '{"result": "ok"}', ""))
+  log = fake(tmp_path, monkeypatch, "claude", '{ [[ -t 0 ]] && echo "stdin is a terminal" || echo "stdin is not a terminal"; echo "AGENTS_REVIEWER=$AGENTS_REVIEWER"; } >> "$log"\necho \'{"result": "ok"}\'')
   backend = Backend("claude", {"kind": "cli", "format": "json", "reply_key": "result", "argv": ["claude", "-p", "{prompt}"], "effort_argv": ["--effort", "{effort}"], "models": {"text": "m"}})
-  backend.run("hi")
-  backend.run("hi", effort="low")
-  assert all(kwargs.get("stdin") is subprocess.DEVNULL for _, kwargs in seen)
-  assert "--effort" not in seen[0][0] and seen[1][0][-2:] == ["--effort", "low"]
+  assert backend.run("hi") == Reply("ok", None) and backend.run("hi", effort="low") == Reply("ok", None)
+  assert log.read_text().splitlines() == ["claude -p hi", "stdin is not a terminal", "AGENTS_REVIEWER=1", "claude -p hi --effort low", "stdin is not a terminal", "AGENTS_REVIEWER=1"]   # effort only when asked, and marked, so the hooks inside it skip
 
   assert Backend("ollama", {"kind": "http", "url": "u"}).parallel == 1   # one process holds one model
   assert Backend("x", {"kind": "http", "url": "u", "parallel": 3}).parallel == 3
@@ -52,6 +49,19 @@ def test_an_http_backend_waits_out_a_dropped_call_but_not_a_refusal(monkeypatch)
     calls.clear()
     with pytest.raises(RuntimeError, match=said): Backend("ollama", {"kind": "http", "url": "http://localhost:1/v1", "models": {"text": "m"}}).run("hi")
     assert len(calls) == tries, code
+
+
+def test_an_http_backend_told_to_come_back_later_waits_as_long_as_it_is_told(monkeypatch):
+  """A 429 or a 408 is retried like a dropped call, after the Retry-After seconds it gives, capped at the backend's timeout, or the usual backoff without one."""
+  waited = []
+  def answer(request, timeout): raise urllib.error.HTTPError(request.full_url, code, "busy", headers, None)
+  monkeypatch.setattr(backends.urllib.request, "urlopen", answer)
+  monkeypatch.setattr(backends.time, "sleep", waited.append)
+
+  for code, headers, timeout, expected in ((429, {"Retry-After": "7"}, 300, [7, 7]), (429, {"Retry-After": "120"}, 30, [30, 30]), (408, {}, 300, [2, 4]), (429, {"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, 300, [2, 4])):
+    waited.clear()
+    with pytest.raises(RuntimeError, match="unreachable .* after 3 tries"): Backend("ollama", {"kind": "http", "url": "http://localhost:1/v1", "models": {"text": "m"}, "timeout": timeout}).run("hi")
+    assert waited == expected, (code, headers)
 
 
 def test_a_reply_is_read_wherever_its_object_sits_and_a_turn_keeps_its_role_and_its_cap():
@@ -146,13 +156,21 @@ def test_a_review_reads_the_files_git_lists_filtered_by_path_and_by_what_the_sta
   assert found() == ["café.py", "keep.py", "my notes.py", "sub/keep.py", "sub/migrations/0001.py", "untracked.py"]   # a file not yet added counts; not dist, __pycache__, ignored, big
   assert found(["keep.py"]) == ["café.py", "my notes.py", "sub/keep.py", "sub/migrations/0001.py", "untracked.py"]
   assert found(["sub/*"]) == ["café.py", "keep.py", "my notes.py", "untracked.py"]   # fnmatch's * crosses /
+  assert found(["**/keep.py"]) == ["café.py", "my notes.py", "sub/migrations/0001.py", "untracked.py"]   # `**/` matches no folder too, as in .gitignore
   assert found(max_bytes=1) == []
 
   monkeypatch.chdir(root)
   assert cli.main(["sub", "review", "simplify", "--commit", "HEAD", "--dry-run"]) == 0
   captured = capsys.readouterr()
   assert "sub/keep.py" in captured.out and "my notes.py" in captured.out
-  assert "__pycache__" not in captured.out and "skipping 2 files under __pycache__, dist\n" in captured.err
+  assert "__pycache__" not in captured.out and "skipping 1 file under __pycache__\n" in captured.err and "skipping 1 file under dist\n" in captured.err
+  assert "big.py" not in captured.out and "skipping 1 file over max_bytes (200000)\n" in captured.err   # a commit's file list honours the size cap
+
+  for route in (["--commit", "HEAD"], ["keep.py", "sub/keep.py", "café.py", "big.py"]):   # a commit's files and named ones, filtered as discovery is
+    assert cli.main(["sub", "review", "simplify", *route, "--exclude", "**/keep.py", "--dry-run"]) == 0
+    captured = capsys.readouterr()
+    assert "keep.py" not in captured.out and "big.py" not in captured.out and "café.py" in captured.out, route
+    assert "skipping 2 files excluded by **/keep.py\n" in captured.err, route
 
   chosen = lambda names, **kwargs: [path.name for path in review.plan(["file-review"], ag.definitions(), [tmp_path / name for name in names], [], {}, **kwargs)[0][1]]
   assert chosen(["a.py", "notes.md", "logo.png", "b.pyi"], globs=["*.py", "*.pyi"]) == ["a.py", "b.pyi"]

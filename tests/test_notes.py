@@ -1,12 +1,14 @@
 """Tests for the standards a file gets and the chain of notes it sits in: which are found, in what order, and how a note is mapped and split."""
 
 import os
+import re
+import subprocess
 from pathlib import Path
 
 import pytest
-from conftest import git, note, put
+from conftest import REPO, git, note, put
 
-from agentkit import agents as ag, hub, inject, mapblock, notes, review, tree
+from agentkit import agents as ag, doctor, hub, inject, mapblock, notes, review, tree
 from agentkit.frontmatter import parse
 from agentkit.standards import Library, scoped
 
@@ -24,6 +26,16 @@ def test_standards_follow_related_namespace_and_extends(tmp_path, files, target,
   assert [layer.doc.name for layer in Library(tmp_path).for_file(target)] == expected
 
 
+def test_a_family_folder_holds_its_standards(tmp_path):
+  """`latex/latex.md` and `latex/robotics.md` load like `latex.md` and `latex.robotics.md`; a hidden folder is skipped."""
+  (tmp_path / "latex").mkdir()
+  (tmp_path / "latex" / "latex.md").write_text("---\nname: latex\napplies: *.tex\n---\n\nbody\n")
+  (tmp_path / "latex" / "robotics.md").write_text("---\nname: latex.robotics\napplies: report.tex\n---\n\nbody\n")
+  (tmp_path / ".reviews").mkdir()
+  (tmp_path / ".reviews" / "stray.md").write_text("---\nname: stray\napplies: *.tex\n---\n\nbody\n")
+  assert [layer.doc.name for layer in Library(tmp_path).for_file("report.tex")] == ["latex", "latex.robotics"]
+
+
 def test_a_section_naming_a_file_governs_that_file_alone(tmp_path):
   """A filename heading scopes its rules, a prose heading does not, and a split part is governed as its note."""
   (tmp_path / "s.md").write_text("---\nname: s\napplies: *.md\n---\n\n## context.md\n\nCONTEXT-RULE\n\n## learned.md\n\nLEARNED-RULE\n\n## Findings go in learned.md\n\nPROSE-RULE\n\n## All four\n\nSHARED-RULE\n")
@@ -37,9 +49,13 @@ def test_a_section_naming_a_file_governs_that_file_alone(tmp_path):
 
   assert notes.match_name(tmp_path / ".agents" / "learned" / "01-traps.md") == "learned.md"
 
-  document = parse("---\nname: x\nno closing fence\n")     # a hand edit that loses the closing fence loses no text
+
+def test_frontmatter_that_never_closes_is_read_as_none():
+  """A hand edit that loses the closing fence loses no text, and the map reads it the same way."""
+  document = parse("---\nname: x\nno closing fence\n")
   assert document.meta == {}
   assert "no closing fence" in document.body
+  assert mapblock.apply("---\nname: x\n\n## A\n\nx\n\n## B\n\ny\n").splitlines()[1] == mapblock.START   # from the top, as a note with none
 
 
 def test_a_file_heading_inside_a_fenced_example_is_text_not_a_section(tmp_path):
@@ -69,6 +85,15 @@ def test_a_repos_agents_toml_reaches_inject_and_review_alike(tmp_path, monkeypat
   assert "file-review" not in routed
 
 
+def test_an_agents_toml_that_does_not_parse_sets_nothing_and_an_edit_still_gets_its_standards_and_notes(tmp_path, monkeypatch):
+  """A hand-edited agents.toml that does not parse reads as `{}`, so the payload and the library for an edit beside it are what they would be without it."""
+  monkeypatch.setattr(hub, "LOCAL", tmp_path / "local.toml")
+  (note(git(tmp_path), "CTX") / "agents.toml").write_text("inject = \n")
+  module, = put(tmp_path, "mod.py")
+  assert tree.agents_toml(tmp_path / ".agents") == {}
+  assert "CTX" in tree.payload(module)[0] and "python" in [layer.doc.name for layer in inject.library_for(module).for_file(module.name)]
+
+
 def test_the_chain_is_outermost_first_stops_at_the_root_and_injects_only_context(tmp_path):
   """Only a .agents holding notes joins the chain, nothing above the repo root does, and only context loads."""
   note(tmp_path / "outside")
@@ -93,9 +118,15 @@ def test_the_chain_is_outermost_first_stops_at_the_root_and_injects_only_context
   assert tree.payload(root / "f.py")[0] == ""
 
 
+def test_githooks_dispatch_opts_a_repo_in_by_the_names_notes_knows():
+  """githooks/_dispatch is shell and cannot import notes.NOTES, so it types the names again: the same names, in the same order."""
+  looped = re.search(r"^for note in (.+); do$", (REPO / "githooks" / "_dispatch").read_text(encoding="utf-8"), re.MULTILINE)
+  assert looped and tuple(looped.group(1).split()) == notes.NOTES
+
+
 def test_a_walk_never_enters_a_directory_it_would_skip(tmp_path, monkeypatch):
   """Finding notes and discovering files without git both prune before descending, not after."""
-  root = git(tmp_path / "repo")
+  root = tmp_path / "tree"   # outside any repo, where finding notes walks
   note(root)
   note(root / "node_modules" / "pkg")
   skipped = (".venv", "node_modules", "pkg.egg-info", ".ipynb_checkpoints", "cdk.out")
@@ -117,6 +148,46 @@ def test_a_walk_never_enters_a_directory_it_would_skip(tmp_path, monkeypatch):
   assert entered
   assert not [directory for directory in entered if set(skipped) & set(directory.relative_to(tmp_path / "plain").parts)]
 
+  note(root / "data" / "set")   # a repo adds a directory of its own to [walk] skip in its agents.toml
+  assert root / "data" / "set" / ".agents" in tree.find_note_dirs(root)
+  (root / ".agents" / "agents.toml").write_text('[walk]\nskip = ["data"]\n')
+  assert tree.find_note_dirs(root) == [root / ".agents"] and "node_modules" in tree.skipped(root)   # added to the hub's list, not in place of it
+
+
+def test_in_a_repo_git_names_the_notes_and_reads_no_other_checkout_and_no_ignored_directory(tmp_path, monkeypatch):
+  """A tracked note, an untracked split part and a gitignored `.local` are found without a walk; a checkout below the repo, a gitignored or skipped directory and a note deleted since it was added are not."""
+  root = git(tmp_path / "repo")
+  put(root, ".gitignore", text="build/\n")
+  put(root, ".agents/.gitignore", text=".local/\n")
+  note(root)
+  put(root, ".agents/.local/context.md", "src/.agents/learned/01-traps.md", text="---\nname: x\n---\n\nx\n")
+  note(root / "gone")
+  subprocess.run(["git", "add", ".gitignore", ".agents", "gone"], cwd=root, check=True)
+  (root / "gone" / ".agents" / "context.md").unlink()   # still in the index
+
+  nested = git(root / ".claude" / "worktrees" / "x")   # another checkout, as a worktree is
+  put(root, ".claude/worktrees/x/.agents/context.md", ".claude/worktrees/x/.agents/.local/context.md", "build/out/.agents/context.md", "build/out/.agents/.local/context.md", "node_modules/pkg/.agents/context.md")
+
+  def walk(*args, **kwargs): raise AssertionError("walked inside a repo")
+  monkeypatch.setattr(os, "walk", walk)
+  assert tree.find_note_dirs(root) == [root / ".agents", root / ".agents" / ".local", root / "src" / ".agents"]
+  assert tree.find_note_dirs(root / "src") == [root / "src" / ".agents"]   # from below the root, only what is under it
+  assert tree.find_note_dirs(nested) == [nested / ".agents", nested / ".agents" / ".local"]   # that checkout still finds its own
+
+
+def test_doctor_outside_a_repo_walks_no_notes_and_says_so(tmp_path, monkeypatch):
+  """From a directory in no repo, doctor never looks for notes, so a bad agents.toml there is not judged, and one passing line says why."""
+  monkeypatch.setenv("HOME", str(tmp_path / "home"))
+  plain = tmp_path / "plain"
+  (note(plain) / "agents.toml").write_text('inject = "ful"\n')
+  monkeypatch.chdir(plain)
+
+  def find_note_dirs(root): raise AssertionError(f"looked for notes under {root}")
+  monkeypatch.setattr(tree, "find_note_dirs", find_note_dirs)
+  checks = doctor.checks()
+  assert (True, "no repo here, so no notes were walked; run `agent doctor` inside a repo to check one", "") in checks
+  assert not [label for _, label, _ in checks if "agents.toml" in label or "context.md" in label]
+
 
 def lands(text: str) -> bool:
   """Whether every map row points at the heading it names."""
@@ -136,6 +207,9 @@ def test_the_map_settles_in_one_pass_and_split_leaves_the_note_as_an_index(tmp_p
   assert mapblock.apply(grown) == grown
   assert mapblock.START not in mapblock.apply("# T\n\n## Only\n\nx\n")     # one section, no table
   assert [name for name, _ in mapblock.headings("## A\n\n```\n## Not a heading\n```\n\n### B\n".splitlines())] == ["A", "B"]
+  assert [name for name, _ in mapblock.headings("## A\n\n~~~\n## Not one\n```\n## Still not\n~~~\n\n## B\n".splitlines())] == ["A", "B"]   # a fence closes only on its own character
+  assert [name for name, _ in mapblock.headings("## A\n\n````\n```\n## Not one\n````\n\n## B\n".splitlines())] == ["A", "B"]   # and only on a run at least as long
+  assert mapblock.apply("---\nname: n\n---\n\n## A\n\nx\n\n## B\n\ny\n").splitlines()[4] == mapblock.START     # no title: under the frontmatter, not at the end
 
   path = tmp_path / "learned.md"
   path.write_text(f"---\nname: learned\nkind: learned\n---\n\n# What we learned\n\nNewest first.\n\n{mapblock.START}\n\n| section | line |\n|---|---|\n\n{mapblock.END}\n\n## A\n\n### one\n\nx\n\n### two\n\ny\n\n```md\n## not a section\n```\n\n## B\n\nz\n")

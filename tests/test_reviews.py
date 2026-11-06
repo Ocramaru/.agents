@@ -1,10 +1,14 @@
 """Tests for the stored reviews, the messages the person reads, and a review run as it is watched."""
 
-import subprocess, threading
+import os
+import subprocess
+import threading
+import uuid
 from contextlib import nullcontext
+from pathlib import Path
 
 import pytest
-from conftest import Stub, findings, git, note, put, record, run_review
+from conftest import Stub, findings, git, locked, note, put, record, run_review
 
 from agentkit import agents, cli, command, doctor, git as agentkit_git, hooks, inject, review, reviews
 from agentkit.cli import out, show
@@ -19,21 +23,41 @@ def test_the_reviews_lose_no_record_and_keep_no_half_written_review(reviewable_r
   assert len(rows) == 6 and [row["id"] for row in rows] == sorted(row["id"] for row in rows)   # uuid7 orders itself
   assert (reviewable_repo / ".agents" / ".gitignore").read_text().splitlines() == [".reviews/", ".local/"]
 
-  held, real_connect, real_insert = threading.Event(), reviews.connect, reviews._insert
+  held, real_connect = threading.Event(), reviews.connect
   monkeypatch.setattr(reviews, "connect", lambda *args, **kwargs: (held.wait(5), real_connect(*args, **kwargs))[1])   # the writer waits on the first record while the other two queue behind it
-  monkeypatch.setattr(reviews, "_insert", lambda connection, row: (_ for _ in ()).throw(ValueError("bad row")) if row["task"] == "u1" else real_insert(connection, row))
-  with pytest.raises(ValueError, match="bad row"), reviews.writer(reviewable_repo) as put_row:
-    for index in range(3): put_row(record(reviewable_repo, f"u{index}", f"g{index}.py", []))
+  with pytest.raises(duckdb.Error), reviews.writer(reviewable_repo) as put_row:   # u1's body is a value duckdb cannot store
+    for index in range(3): put_row(record(reviewable_repo, f"u{index}", f"g{index}.py", []) | ({"body": object()} if index == 1 else {}))
     held.set()
   assert sorted(row["task"] for row in reviews.conversations(reviewable_repo) if row["task"].startswith("u")) == ["u0", "u2"]
 
-  same = reviews.uuid7()
-  monkeypatch.setattr(reviews, "uuid7", lambda: same)   # two findings with one id: the second insert fails
-  with pytest.raises(duckdb.ConstraintException): reviews.write(record(reviewable_repo, "half", "mod.py", [{"line": 1, "issue": "first"}, {"line": 2, "issue": "second"}]), reviewable_repo)
+  # a second finding duckdb cannot store fails after the review and the first finding are in
+  with pytest.raises(duckdb.Error): reviews.write(record(reviewable_repo, "half", "mod.py", [{"line": 1, "issue": "first"}, {"line": 2, "issue": object()}]), reviewable_repo)
   assert "half" not in [row["task"] for row in reviews.conversations(reviewable_repo)]
 
   monkeypatch.setattr(reviews, "connect", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("no duckdb")))
   with pytest.raises(RuntimeError, match="no duckdb"), reviews.writer(reviewable_repo) as put_row: put_row({"id": "x"})
+
+
+def test_reviews_that_cannot_be_read_cost_an_edit_nothing_and_are_logged(reviewable_repo):
+  """An edit still goes ahead with no findings when the reviews will not open, and the hook log says why."""
+  module, = put(reviewable_repo, "mod.py")
+  reviews.path(reviewable_repo).write_bytes(b"not a database")
+  session = f"r{uuid.uuid4().hex[:7]}"   # the log is the suite's, shared, and a row keeps eight characters of its session
+  assert str(hooks.LOG) == os.environ["AGENTS_HOOK_LOG"]   # never this machine's log, which hooks.LOG would be had it loaded before conftest set it
+  assert inject.open_findings(module, session) == []
+  logged, = hooks.entries(log=hooks.LOG, session=session)
+  assert logged[1] == "inject" and logged[3] == "ERROR" and logged[4].startswith(f"could not read the reviews, so no findings went with {module.resolve()}: ")
+
+
+def test_reviews_another_process_has_locked_are_skipped_not_logged_as_a_crash(reviewable_repo):
+  """A review writing in another process holds the lock; the edit goes ahead with no findings, logged as a skip that doctor and status do not count."""
+  pytest.importorskip("duckdb")
+  module, = put(reviewable_repo, "mod.py")
+  reviews.connect(reviewable_repo).close()
+  session = f"l{uuid.uuid4().hex[:7]}"
+  with locked(reviews.path(reviewable_repo)): assert inject.open_findings(module, session) == []
+  logged, = hooks.entries(log=hooks.LOG, session=session, verbose=True)
+  assert logged[3:] == ["skip", f"reviews locked, no findings went with {module.resolve()}"] and not hooks.entries(log=hooks.LOG, session=session)   # routine, so not among the errors
 
 
 def test_open_findings_are_the_newest_verdict_on_a_file_that_still_has_content(reviewable_repo):
@@ -63,6 +87,11 @@ def test_open_findings_are_the_newest_verdict_on_a_file_that_still_has_content(r
     module.write_text(text)
     run_review("file-review", backend, [module], reviewable_repo, role="code")
     assert bool(reviews.open_findings(reviewable_repo)) == opened
+
+  module.write_text("x = 1\n")
+  run_review("file-review", Stub(findings({"line": 1, "issue": "x is unused"})), [module], reviewable_repo, role="code")
+  run_review("file-review", Stub({"kind": "findings", "state": "failed", "body": "gave up"}), [module], reviewable_repo, role="code", fresh=True)
+  assert [finding["issue"] for finding in reviews.open_findings(reviewable_repo)] == ["x is unused"]   # a review that failed is no verdict, whatever kind it called itself
 
 
 def test_a_finding_closes_by_line_range_or_id_and_only_wrong_is_passed_back(reviewable_repo):
@@ -97,6 +126,73 @@ def test_a_finding_closes_by_line_range_or_id_and_only_wrong_is_passed_back(revi
 
   reviews.write(record(reviewable_repo, "t-id", "abcdef", [{"line": 1, "issue": "named like an id"}]), reviewable_repo)
   assert issues("abcdef") == ["named like an id"]   # a file named like a finding id is closed by its name
+
+
+def test_a_whole_review_is_one_conversation_whose_findings_land_under_their_own_files_and_close_like_any_other(reviewable_repo, tmp_path_factory, monkeypatch, capsys):
+  """Every file is in one prompt as what it is; a finding is kept under the name its file was shown by, however the model wrote it; a dismissal reaches the next run, an unchanged set is not asked again, and a per-file review refuses the reviewer."""
+  rule, = put(reviewable_repo, "standards/python.md", text="two-space indent\n")
+  (outside := tmp_path_factory.mktemp("claude") / "fact.md").write_text("the box has 8 GPUs\n")
+  files, definition = {rule: "a profile standard", outside: "a memory"}, agents.definition("profile-review", agents.definitions())
+  backend = Stub(findings({"file": "python.md", "line": 1, "issue": "duplicate: also in AGENTS.md"}, {"file": str(outside), "line": 1, "issue": "memory: belongs in context.md"}))
+  ask = lambda **kwargs: review.whole("profile-review", backend, files, definition, reviewable_repo, "review-profile-review", **kwargs)
+
+  result = ask(run="r1")
+  assert len(backend.shown) == 1 and "- standards/python.md: a profile standard" in backend.shown[0] and f"- {outside.resolve()}: a memory" in backend.shown[0]
+  assert [finding["file"] for finding in result["findings"]] == ["standards/python.md", str(outside.resolve())]
+  memory, = [finding for finding in reviews.open_findings(reviewable_repo) if finding["file"] == str(outside.resolve())]
+  reviews.close(reviewable_repo, reviews.short_id(memory["id"]), 0, "wrong", "a fact about the box, kept where it is")
+
+  again = ask(run="r2")
+  assert again["reused"] == "r1" and len(backend.shown) == 1 and [finding["file"] for finding in again["findings"]] == ["standards/python.md"]
+  ask(run="r3", fresh=True)
+  assert "a fact about the box, kept where it is" in backend.shown[-1] and reviews.open_findings(reviewable_repo) == []   # the clean verdict supersedes
+
+  monkeypatch.chdir(reviewable_repo)
+  assert cli.main(["sub", "review", "profile-review", "standards/python.md"]) == 2 and "agent profile review" in capsys.readouterr().err
+
+
+def test_a_whole_finding_that_names_no_one_shown_file_stays_open_under_the_name_it_gave(reviewable_repo, tmp_path_factory):
+  """A basename two shown files share cannot be placed, so it is kept as the model wrote it, listed and closed by id, and never sent to a recheck that has no such file."""
+  ours, = put(reviewable_repo, "standards/python.md", text="two-space indent\n")
+  (theirs := tmp_path_factory.mktemp("starters") / "python.md").write_text("four-space indent\n")
+  backend = Stub(findings({"file": "python.md", "line": 1, "issue": "contradicts the other python.md"}))
+  result = review.whole("profile-review", backend, {ours: "a profile standard", theirs: "the starter it replaces"}, agents.definition("profile-review", agents.definitions()), reviewable_repo, "review-profile-review")
+  assert [finding["file"] for finding in result["findings"]] == ["python.md"]
+  found, = reviews.open_findings(reviewable_repo)
+  assert found["file"] == "python.md" and reviews.to_recheck(reviewable_repo) == {}
+  assert [closed["issue"] for closed in reviews.close(reviewable_repo, reviews.short_id(found["id"]), 0, "wrong", "they apply to different files")] == ["contradicts the other python.md"]
+
+  module, = put(reviewable_repo, "mod.py")   # a review of one file still drops the findings of a file since deleted
+  reviews.write(record(reviewable_repo, "t-mod", "mod.py", [{"line": 1, "issue": "unused"}]), reviewable_repo)
+  module.unlink()
+  assert reviews.open_findings(reviewable_repo) == []
+
+
+def test_a_review_waits_out_a_lock_on_its_history_rather_than_forgetting_it(reviewable_repo, monkeypatch):
+  """Verdicts and dismissals read while another process holds the write lock are waited for, as a write is, and not read as no history."""
+  put(reviewable_repo, "mod.py")
+  run_review("file-review", Stub(findings({"line": 1, "issue": "backwards"})), [reviewable_repo / "mod.py"], reviewable_repo, role="code")
+  reviews.close(reviewable_repo, "mod.py", 1, "wrong", "lower is better here")
+  task = review.task_id("file-review", reviewable_repo, "mod.py")
+
+  for read, expected in ((lambda: list(reviews.verdicts(reviewable_repo)), [task]), (lambda: list(reviews.dismissals(reviewable_repo)), ["mod.py"])):
+    with locked(reviews.path(reviewable_repo)) as holder, monkeypatch.context() as patch:   # the first wait lets go of the lock
+      waited = []
+      patch.setattr(reviews.time, "sleep", lambda seconds, waited=waited, holder=holder: waited.append(seconds) or holder.stdin.close() or holder.wait())
+      assert read() == expected
+    assert waited
+
+
+def test_paths_from_two_repos_are_refused_since_each_repo_keeps_its_own_reviews(tmp_path, monkeypatch, capsys):
+  """Naming files or folders in two repos stops before anything is read, naming both, and a repo's own paths still route."""
+  one, two = git(tmp_path / "one"), git(tmp_path / "two")
+  first, second = put(one, "a.py") + put(two, "b.py")
+  monkeypatch.chdir(tmp_path)
+  for paths in ([first, second], [one, second]):
+    assert cli.main(["sub", "review", "file-review", *map(str, paths), "--dry-run"]) == 2
+    said = capsys.readouterr().err
+    assert "2 repos" in said and str(one) in said and str(two) in said
+  assert cli.main(["sub", "review", "file-review", str(first), str(one), "--dry-run"]) == 0 and "a.py" in capsys.readouterr().out
 
 
 def test_a_dismissal_made_in_a_worktree_reaches_the_main_checkout_and_nothing_else_does(reviewable_repo, tmp_path_factory, monkeypatch, capsys):
@@ -146,6 +242,28 @@ def test_a_dismissal_made_in_a_worktree_reaches_the_main_checkout_and_nothing_el
   assert cli.main(["sub", "import", str(elsewhere / "nope.duckdb")]) == 2
 
 
+def test_a_dismissal_the_main_checkout_cannot_take_closes_nothing_so_closing_again_does_both(reviewable_repo, monkeypatch):
+  """The main checkout's reviews are written first: when that write fails the worktree's finding stays open, and a second close lands in both."""
+  main = reviewable_repo
+  run = lambda *args: subprocess.run(["git", "-c", "user.name=T", "-c", "user.email=t@t.io", *args], cwd=main, check=True, capture_output=True)
+  put(main, "a.py")
+  run("add", "-A")
+  run("commit", "-qm", "init")
+  run("worktree", "add", "-q", ".claude/worktrees/feature")
+  linked = main / ".claude" / "worktrees" / "feature"
+  reviews.write(record(linked, "t-a", "a.py", [{"line": 1, "issue": "backwards"}]), linked)
+  reviews.connect(main).close()   # the main checkout's reviews exist, as they do once it has been reviewed
+
+  real = reviews.connect
+  with monkeypatch.context() as patch:   # a lock on the main checkout's reviews that outlasts every retry
+    patch.setattr(reviews, "connect", lambda root, read_only=False, tries=1: (_ for _ in ()).throw(OSError("Conflicting lock is held")) if not read_only and Path(root).resolve() == main.resolve() else real(root, read_only, tries))
+    with pytest.raises(OSError, match="Conflicting lock"): reviews.close(linked, "a.py", 1, "wrong", "lower is better here")
+  assert [finding["issue"] for finding in reviews.open_findings(linked)] == ["backwards"] and reviews.dismissals(main) == {}
+
+  reviews.close(linked, "a.py", 1, "wrong", "lower is better here")
+  assert reviews.open_findings(linked) == [] and [row["issue"] for row in reviews.dismissals(main)["a.py"]] == ["backwards"]
+
+
 def test_what_the_person_is_told_arrives_whole(reviewable_repo, capsys, monkeypatch):
   """The hook log reads back by session and parses into columns, model text survives the table and the pipe, and a duplicate command name is refused."""
   log = reviewable_repo / "h.log"
@@ -177,6 +295,9 @@ def test_what_the_person_is_told_arrives_whole(reviewable_repo, capsys, monkeypa
   monkeypatch.setattr(command, "COMMANDS", list(command.COMMANDS))
   command.command("only-once")(lambda args: 0)
   with pytest.raises(ValueError, match="already registered"): command.command("only-once")(lambda args: 0)
+  monkeypatch.setattr(command, "DEFAULTS", dict(command.DEFAULTS))
+  command.command("first", group="solo", default=True)(lambda args: 0)
+  with pytest.raises(ValueError, match="group solo already runs <lambda> by default, so second cannot"): command.command("second", group="solo", default=True)(lambda args: 0)
 
 
 def test_doctor_names_a_bad_setting_and_judges_format_on_save_and_hook_errors(tmp_path, monkeypatch):
@@ -185,7 +306,11 @@ def test_doctor_names_a_bad_setting_and_judges_format_on_save_and_hook_errors(tm
   (note(repo) / "agents.toml").write_text('inject = "ful"\n\n[applies]\nnosuch = ["mod.py"]\n')
   monkeypatch.chdir(repo)
   failed = [label for passed, label, _ in doctor.checks() if not passed]
-  assert f"{repo.name}/agents.toml inject = 'ful'" in failed and f"{repo.name}/agents.toml applies -> nosuch" in failed
+  assert f"{repo.name}/.agents/agents.toml inject = 'ful'" in failed and f"{repo.name}/.agents/agents.toml applies -> nosuch" in failed
+  (repo / "src").mkdir()
+  monkeypatch.chdir(repo / "src")   # from a subfolder, the root's .agents is above it and still checked
+  assert f"{repo.name}/.agents/agents.toml applies -> nosuch" in [label for passed, label, _ in doctor.checks() if not passed]
+  monkeypatch.chdir(repo)
   (repo / ".agents" / "agents.toml").write_text('inject = "full",\n')   # a trailing comma, as a hand edit leaves one
   (passed, label, fix), = [check for check in doctor.checks() if "parses" in check[1]]
   assert not passed and label.endswith("agents.toml parses as TOML") and fix.startswith("fix it: ")
@@ -260,7 +385,7 @@ def test_a_review_names_what_it_skipped_and_a_listing_defaults_to_where_you_stan
   for name, text in (("install.sh", "#!/usr/bin/env bash\n"), ("README.md", "# t\n"), ("dotfiles/tmux.conf", "set -g mouse off\n")): put(tool, name, text=text)
   subprocess.run(["git", "add", "-A"], cwd=reviewable_repo, check=True)   # discovery reads what git tracks
   monkeypatch.chdir(tool)
-  cli.main(["sub", "review", ".", "--dry-run"])
+  assert cli.main(["sub", "review", ".", "--dry-run"]) == 0
   printed = capsys.readouterr()
   assert "file-review" in printed.out and "tool/install.sh" in printed.out   # shell scripts route to both reviewers
   assert "not reviewed, no standard covers them: 1 file (.conf 1) in tool/dotfiles/ 1" in printed.err

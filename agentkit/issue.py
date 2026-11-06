@@ -12,7 +12,7 @@ import urllib.parse
 import webbrowser
 from pathlib import Path
 
-from agentkit import gh, git, hub
+from agentkit import gh, git, hub, words
 
 LINK_LIMIT = 8000   # characters a browser will take in a link
 
@@ -43,7 +43,7 @@ def filed(repository: str) -> list[str]:
     count = issue.get("comments") or 0
     count = len(count) if isinstance(count, list) else count     # gh returns the comments themselves, older ones a count
     # comments, not replies: a repeat report from another machine lands as a comment too
-    out.append(f"#{issue['number']}  {issue['title']}" + (f", {count} comment{'' if count == 1 else 's'}" if count else "")
+    out.append(f"#{issue['number']}  {issue['title']}" + (f", {words.count(count, 'comment')}" if count else "")
                + f"\n    {issue['url']}")
   return out
 

@@ -79,6 +79,26 @@ def test_each_part_standard_and_section_goes_out_once_per_session(site):
   assert send(site / ".agents" / "todo.md", session) == ""
 
 
+def test_a_session_start_sends_the_notes_from_the_root_down_and_an_edit_there_does_not_send_them_again(site, tmp_path_factory):
+  """Start sends every context on the path to the directory and names the rest, with no standard; once marked, an edit in that directory gets only its standards, and a start with no notes above it is ungoverned."""
+  package = site / "pkg"
+  (package / ".agents").mkdir(parents=True)
+  (package / ".agents" / "context.md").write_text(HEAD + "PKG-RULE the package's own\n")
+  (site / ".agents" / "learned.md").write_text(HEAD.replace("context", "learned") + "# What we learned\n\nNOT-LOADED\n")
+  (package / "mod.py").write_text("x = 1\n")
+
+  session = f"start-{uuid.uuid4().hex}"
+  text, keys, governed = inject.start(package, session)
+  assert governed and rules(text) == {"REVIEWS-RULE", "HOOKS-RULE", "SHARED-RULE", "PKG-RULE"} and text.index("SHARED-RULE") < text.index("PKG-RULE")   # outermost first
+  assert "learned.md" in text and "NOT-LOADED" not in text and "--- python" not in text   # named, not loaded; standards wait for a file
+  inject.mark(session, keys)
+
+  edit = inject.payload(package / "mod.py", session)[0]
+  assert "--- python" in edit and rules(edit) == set() and inject.MENTION not in edit
+  assert inject.start(package, session)[:2] == ("", [])   # a resume, already in context
+  assert inject.start(tmp_path_factory.mktemp("bare"), session) == ("", [], False)
+
+
 def test_a_config_only_agents_does_not_demote_the_nearest_notes(site, tmp_path, monkeypatch):
   """`nearest` is the closest directory with notes; an `.agents` holding only agents.toml is not one."""
   configure(tmp_path, monkeypatch, '[inject]\nnearest = "full"\nancestors = "context"\n')

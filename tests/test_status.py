@@ -2,14 +2,16 @@
 The backend and a missing duckdb are read in-process, where the profile's config and the import can be pinned.
 """
 
-import json, sys
+import json
+import re
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 from conftest import REPO, agent, git, note, put, record, standard
 
 import agentkit.git
-from agentkit import hooks, hub, reviews, status
+from agentkit import hooks, hub, memory, reviews, status
 from agentkit.cli import setup
 
 
@@ -97,8 +99,21 @@ def test_open_findings_are_counted_in_the_repo_here(reviewable_repo):
   assert described(agent(["status"], cwd=reviewable_repo).stdout)["findings"] == [f"2 open in 1 file of {reviewable_repo.resolve()} (`agent sub reviews --open` lists them)"]
 
 
+def test_memory_counts_the_files_waiting_and_their_folders_but_not_the_index_and_each_folder_finds_its_directory(tmp_path, monkeypatch):
+  """Memories are counted with the project folders holding them, MEMORY.md and anything outside `memory/` left out; a folder name finds the directory it flattens, `_` and `.` included, or None once it is gone."""
+  monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+  assert status.inbox() == [("claude memory", f"none waiting (in {tmp_path / 'claude' / 'projects'})", "")]
+
+  (place := tmp_path / "my_repo" / ".hidden").mkdir(parents=True)
+  (tmp_path / "my").mkdir()   # flattens like the start of my_repo, and holds nothing further
+  folder = re.sub(r"[^A-Za-z0-9]", "-", str(place))
+  put(tmp_path / "claude" / "projects", f"{folder}/memory/MEMORY.md", f"{folder}/memory/one.md", f"{folder}/memory/two.md", "-gone/memory/three.md", "-gone/notes.md")
+  assert status.inbox() == [("claude memory", f"3 files waiting in 2 project folders of {tmp_path / 'claude' / 'projects'} (`agent profile review` says where each belongs)", "")]
+  assert memory.place(tmp_path / "claude" / "projects" / folder) == place and memory.place(tmp_path / "claude" / "projects" / "-gone") is None
+
+
 def test_a_broken_part_is_described_and_the_rest_still_show(tmp_path, monkeypatch):
-  """Unparseable settings.json or agents.toml, and reviews with no duckdb to read them, each describe themselves; status still exits 0."""
+  """Unparseable settings.json, and reviews with no duckdb to read them, each describe themselves, while an unparseable agents.toml sets nothing and the standards still count; status still exits 0."""
   repo = git(tmp_path / "repo")
   (note(repo) / "agents.toml").write_text("inject = \n")
   put(repo, ".agents/.reviews/reviews.duckdb", text="")
@@ -106,7 +121,7 @@ def test_a_broken_part_is_described_and_the_rest_still_show(tmp_path, monkeypatc
 
   shown = described(agent(["status"], cwd=repo, env={"CLAUDE_CONFIG_DIR": str(tmp_path / "claude")}).stdout)
   assert shown["claude hooks"][0].startswith(f"unknown ({tmp_path / 'claude' / 'settings.json'} is not valid JSON")
-  assert shown["standards"][0].startswith("cannot be read, TOMLDecodeError: ") and shown["agentkit"] and shown["hook errors"]
+  assert shown["standards"][0].endswith(" bundled, 0 profile, 0 repo") and shown["agentkit"] and shown["hook errors"]
   assert shown["findings"][0].startswith("cannot be read, ")   # an empty file where the reviews go
 
   monkeypatch.setitem(sys.modules, "duckdb", None)   # what importing it does where it is not installed
@@ -117,11 +132,13 @@ def test_a_broken_part_is_described_and_the_rest_still_show(tmp_path, monkeypatc
 def test_each_part_says_whether_it_wants_a_look_or_is_broken(tmp_path, monkeypatch):
   """A part that is fine has no level, one to look at is `warn`, and one that is broken is `fail`."""
   monkeypatch.setattr(status.install, "config_dir", lambda target: tmp_path / "claude")
-  assert status.claude()[0][2] == "fail"   # no settings.json
+  assert status.claude_hooks()[0][2] == "fail"   # no settings.json
   put(tmp_path, "claude/settings.json", text=json.dumps({"hooks": json.loads((REPO / "settings.hooks.json").read_text())}))
-  assert status.claude()[0][2] == ""
-  put(tmp_path, "claude/settings.json", text=json.dumps({"hooks": {}}))
-  assert status.claude()[0][2] == "warn"
+  assert status.claude_hooks()[0][2] == ""
+  put(tmp_path, "claude/settings.json", text=json.dumps({"hooks": {"Notification": [{"hooks": [{"type": "command", "command": "~/bin/mine.sh"}]}]}}))
+  assert status.claude_hooks()[0][2] == "fail"   # none of the hub's hooks
+  put(tmp_path, "claude/settings.json", text=json.dumps({"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "$HOME/.agents/hooks/doc-check.sh"}]}]}}))
+  assert status.claude_hooks()[0][2] == "warn"   # some of them, but not the bundle's
 
   monkeypatch.setattr(status.backends, "load_backends", lambda: ({}, "gone"))
   assert status.backend()[0] == ("backend", "gone, which [backends] does not define", "fail")
@@ -133,7 +150,7 @@ def test_each_part_says_whether_it_wants_a_look_or_is_broken(tmp_path, monkeypat
 
 def test_a_path_under_home_starts_at_a_tilde(tmp_path, monkeypatch):
   """Under home a path is shown from ~, and anywhere else as it is."""
-  monkeypatch.setattr(status.Path, "home", lambda: tmp_path)
+  monkeypatch.setenv("HOME", str(tmp_path))   # what Path.home reads
   assert [status.short(tmp_path / ".agents" / "profile"), status.short("/etc/x")] == ["~/.agents/profile", "/etc/x"]
 
 
@@ -145,7 +162,7 @@ def test_at_a_terminal_a_part_is_named_once_its_detail_dimmed_and_its_level_colo
 
   said = []
   monkeypatch.setattr(setup, "say", said.append)
-  monkeypatch.setattr(setup.sys, "stdout", SimpleNamespace(isatty=lambda: True))
+  monkeypatch.setattr(setup.sys.stdout, "isatty", lambda: True)   # the captured stream, said to be a terminal
   assert setup.cmd_status(None) == 0
   assert said == ["[bold cyan]profile     [/bold cyan]  ~/p [dim](git@x:p.git)[/dim]", "[bold cyan]            [/bold cyan]  [yellow]1 commit not pushed[/yellow]", "[bold cyan]claude hooks[/bold cyan]  [red]not in place [dim](\\[a] b)[/dim][/red]"]
 

@@ -10,7 +10,7 @@ import shutil
 import tomllib
 from pathlib import Path
 
-from agentkit import agents, backends, config, gh, git, guard, hooks, hub, inject, install, mapblock, notes, profile, tree
+from agentkit import agents, backends, config, gh, git, guard, hooks, hub, inject, install, mapblock, notes, profile, standards, tree, words
 from agentkit.frontmatter import load
 from agentkit.standards import Library
 
@@ -19,20 +19,22 @@ def checks() -> list[tuple[bool, str, str]]:
   """Every check as (ok, what was checked, what to do about it), roughly install-time to run-time."""
   out = []
 
-  found = shutil.which("agent")
-  out.append((bool(found and Path(found).resolve() == install.CLI.resolve()), f"`agent` on PATH -> {found or 'not found'}", "`uv tool update-shell` puts uv's bin on PATH; the hooks call the first `agent` there" if hub.INSTALLED else "run `agent install`, and put ~/.local/bin on PATH"))
-  if hub.INSTALLED: out.append((not (stale := install.stale()), f"hooks, githooks, commands and AGENTS.md in {hub.HOME} match this install", f"{len(stale)} missing or changed, {stale[0].relative_to(hub.BUNDLED)} among them; run `agent install`" if stale else ""))
+  found = shutil.which("agent", path=install.shell_path())   # the `agent` a shell finds, not this venv's, which `uv run` puts first
+  out.append((bool(found and Path(found).resolve() == install.CLI.resolve()), f"`agent` on PATH -> {found or 'not found'}", "`uv tool update-shell` puts uv's bin on PATH; the hooks call the `agent` that `agent install` recorded" if hub.INSTALLED else "run `agent install`, and put ~/.local/bin on PATH"))
+  if hub.INSTALLED: out.append((not (stale := [*(source.relative_to(hub.BUNDLED) for source in install.stale()), *(copy.relative_to(hub.HOME) for copy in install.dropped())]), f"hooks, githooks, commands and AGENTS.md in {hub.HOME} match this install", f"{len(stale)} missing, changed or no longer bundled, {stale[0]} among them; run `agent install`" if stale else ""))
 
-  ours = hub.BUNDLED / "settings.hooks.json"
   settings = install.config_dir("claude") / "settings.json"
   try:   # a hand-edited settings.json may not parse, which is a finding, not a crash
-    wanted = json.loads(ours.read_text(encoding="utf-8")) if ours.is_file() else None
-    live = json.loads(settings.read_text(encoding="utf-8")).get("hooks") if settings.is_file() else None
-    fix = "run `agent install` to rewrite it" if wanted else f"{ours} is missing from the hub"
+    wanted = install.claude_block() if hub.HOOKS_BLOCK.is_file() else None
+    loaded = json.loads(settings.read_text(encoding="utf-8")) if settings.is_file() else {}
+    live = loaded.get("hooks") if isinstance(loaded, dict) else None
+    fix = f"{settings} is not a JSON object; fix it, then run `agent install`" if not isinstance(loaded, dict) else "run `agent install` to bring them up to date" if wanted else f"{hub.HOOKS_BLOCK} is missing from the hub"
   except json.JSONDecodeError as error: wanted, live, fix = None, None, f"not valid JSON: {error}"
-  out.append((wanted is not None and live == wanted, f"hooks block in {settings.name} matches settings.hooks.json", fix))
+  except tomllib.TOMLDecodeError as error: wanted, live, fix = None, None, f"a config.toml does not parse, so whether Read is in the matcher is unknown: {error}"   # [inject] read shapes the block
+  except OSError as error: wanted, live, fix = None, None, f"cannot be read: {error}"   # unreadable, or a link that loops
+  out.append((wanted is not None and install.partition(live)[0] == wanted, f"the hub's hooks in Claude Code's {settings.name} match settings.hooks.json, as [inject] read shapes it", fix))   # by the script each runs, so a hook of the user's beside them is no drift
 
-  for hook in sorted((hub.HOME / "hooks").glob("*.sh")): out.append((os.access(hook, os.X_OK), f"{hook.name} is executable", f"chmod +x {hook}"))
+  for hook in sorted([*(hub.HOME / "hooks").glob("*.sh"), hub.HOME / "githooks" / "_dispatch"]): out.append((os.access(hook, os.X_OK), f"{hook.name} is executable", f"chmod +x {hook}"))   # every githook links to _dispatch
 
   commands = sorted((hub.HOME / "commands").glob("*.md"))
   for target, subdirectory in install.COMMANDS.items():
@@ -45,28 +47,36 @@ def checks() -> list[tuple[bool, str, str]]:
     for field in ("related", "extends"):
       for reference in standard.list(field): out.append((reference in library.layers, f"standard {name} {field} {reference}", f"{reference} does not exist; fix the {field} in {standard.path.name}"))
     out.append((bool(standard.get("description")), f"standard {name} has a description", "add one; it is what shows when the body is not loaded"))
+  for name, layers in sorted(library.layers.items()):
+    for layer in layers:   # a family's folder names its members, so latex/robotics.md is latex or latex.<field>
+      if (family := layer.doc.path.parent.name) != "standards": out.append((name == family or name.startswith(f"{family}."), f"standard {name} is named for its folder {family}/", f"name it {family} or {family}.<field> in {layer.doc.path}"))
+  for agents_md, directory in standards.tables().items(): out.append((standards.table(agents_md, directory) == agents_md.read_text(encoding="utf-8"), f"standards table current in {agents_md}", f"agent remap {agents_md}"))
 
   for definition_file in sorted(hub.REVIEWERS.glob("*.md")):
     definition = load(definition_file)
     for reference in definition.list("standards"): out.append((reference in library.layers, f"agent {definition.name} judges against {reference}", f"{reference} does not exist; fix the standards list in {definition_file.name}"))
 
-  here = Path.cwd()
-  note_dirs = tree.find_note_dirs(here)   # walked once, since over a large tree it is the slow part
+  here, root = Path.cwd(), git.root(Path.cwd())
+  note_dirs = list(dict.fromkeys([*tree.chain(here), *tree.find_note_dirs(here)])) if root else []   # walked once, since over a large tree it is the slow part
+  if not root: out.append((True, "no repo here, so no notes were walked; run `agent doctor` inside a repo to check one", ""))   # the machine, the hub and the profile are still checked
+  base = (root or here).parent   # a path is shown from the repo's own name down: my_repo/src/.agents/agents.toml
+  shown = lambda path: path.relative_to(base) if path.is_relative_to(base) else path
 
   # a hand-edited config that does not parse is reported, and every check below waits until it does
-  broken, root = [], git.root(here)
-  for file in dict.fromkeys(path for path in [hub.CONFIG, profile.file("config.toml"), hub.LOCAL, *(directory / tree.AGENTS_TOML for directory in [*note_dirs, *((root / ".agents", root / ".agents" / ".local") if root else ())])] if path and path.is_file()):
+  broken = []
+  for file in dict.fromkeys(path for path in [hub.CONFIG, profile.file("config.toml"), hub.LOCAL, *(directory / tree.AGENTS_TOML for directory in note_dirs)] if path and path.is_file()):
     try: tomllib.loads(file.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as error: broken.append((False, f"{file} parses as TOML", f"fix it: {error}"))
+    except OSError as error: broken.append((False, f"{file} can be read", f"cannot be read: {error}"))
   if broken: return out + broken
 
   for agents_dir in note_dirs:
-    agents_toml = tree.agents_toml(agents_dir)
-    for name in inject.flatten_applies(agents_toml.get("applies") or {}): out.append((name in library.layers, f"{agents_dir.parent.name}/agents.toml applies -> {name}", f"no standard named {name}; check the spelling in {agents_dir / 'agents.toml'}"))
-    if (mode := agents_toml.get("inject")) is not None: out.append((mode in tree.INJECT_MODES, f"{agents_dir.parent.name}/agents.toml inject = {mode!r}", f"inject must be one of {', '.join(tree.INJECT_MODES)}"))   # any other value falls through to the default unreported
+    agents_toml, where = tree.agents_toml(agents_dir), shown(agents_dir / tree.AGENTS_TOML)
+    for name in inject.flatten_applies(agents_toml.get("applies") or {}): out.append((name in library.layers, f"{where} applies -> {name}", f"no standard named {name}; check the spelling in {agents_dir / tree.AGENTS_TOML}"))
+    if (mode := agents_toml.get("inject")) is not None: out.append((mode in tree.INJECT_MODES, f"{where} inject = {mode!r}", f"inject must be one of {', '.join(tree.INJECT_MODES)}"))   # any other value falls through to the default unreported
 
   known, default = backends.load_backends()
-  out.append((default in known, f"default backend {default} is one of [backends]" if default else "a default backend is set, so reviews have somewhere to run", f"fix `default` under [backends] in config.toml; known: {', '.join(known)}" if default else "`agent install` at a terminal asks, or `agent install --backend <name>`"))
+  out.append((default in known, f"default backend {default} is one of [backends]" if default else "a default backend is set, so headless reviews (post-commit, doc-check) can run", f"fix `default` under [backends] in config.toml; known: {', '.join(known)}" if default else f"`agent install --backend <{'|'.join(known)}>`"))
 
   roles = {definition.get("model") for definition in agents.definitions().values()}
   for name, backend in sorted(known.items()):
@@ -104,8 +114,10 @@ def checks() -> list[tuple[bool, str, str]]:
   out.append((importlib.util.find_spec("duckdb") is not None, "duckdb present, reviews can be kept", "`uv sync` in ~/.agents; everything but `agent sub review` works without it"))
 
   for agents_dir in note_dirs:
-    out += context_size(agents_dir, here)
-    for note in notes.note_files(agents_dir): out.append((mapblock.apply(text := note.read_text(encoding="utf-8")) == text, f"map current in {note.relative_to(here)}", f"agent remap {agents_dir}"))
+    out += context_size(agents_dir, base)
+    for note in notes.note_files(agents_dir):
+      try: out.append((mapblock.apply(text := note.read_text(encoding="utf-8")) == text, f"map current in {shown(note)}", f"agent remap {agents_dir}"))
+      except OSError as error: out.append((False, f"map current in {shown(note)}", f"cannot be read: {error}"))
   return out
 
 
@@ -115,6 +127,10 @@ def context_size(agents_dir: Path, base: Path) -> list[tuple[bool, str, str]]:
   if not context.is_file(): return []
 
   body = load(context).body
-  sent = len(tree.brief(body, config.section("inject")["map_over"]).encode())
+  whole, sent = len(body.encode()), len(tree.brief(body, config.section("inject")["map_over"]).encode())
   offered = [part for part, globs in tree.parts(agents_dir, "context") if not globs]
-  return [(True, f"{agents_dir.relative_to(base) if agents_dir.is_relative_to(base) else agents_dir}/context.md {f"sends {sent} bytes" if sent >= len(body.encode()) else f"sends its map, {sent} of {len(body.encode())} bytes"}{f", {len(offered)} part{'' if len(offered) == 1 else 's'} to read on demand" if offered else ""}", "")]
+
+  where = agents_dir.relative_to(base) if agents_dir.is_relative_to(base) else agents_dir
+  sends = f"sends {sent} bytes" if sent >= whole else f"sends its map, {sent} of {whole} bytes"
+  parts = f", {words.count(len(offered), 'part')} to read on demand" if offered else ""
+  return [(True, f"{where}/context.md {sends}{parts}", "")]

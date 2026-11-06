@@ -5,7 +5,9 @@ set -euo pipefail
 
 requirement="${AGENTS_SOURCE:-git+https://github.com/Ocramaru/.agents}"
 if ! command -v uv >/dev/null 2>&1; then echo "install uv first: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2; exit 1; fi
-if [[ "${1:-}" == "--dry-run" ]]; then printf 'would run: uv tool install %s\n           agent install %s\n' "$requirement" "${*:2}"; exit 0; fi
+dry_run='' arguments=()
+for argument in "$@"; do if [[ "$argument" == "--dry-run" ]]; then dry_run=1; else arguments+=("$argument"); fi; done
+if [[ -n "$dry_run" ]]; then printf 'would run: uv tool install %s\n           agent install %s\n' "$requirement" "${arguments[*]:-}"; exit 0; fi
 
 uv tool install "$requirement"
 agent="$(uv tool dir --bin)/agent"

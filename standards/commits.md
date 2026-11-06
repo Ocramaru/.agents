@@ -1,6 +1,6 @@
 ---
 name: commits
-description: Commit message format, and what never goes in one
+description: Commit message format, and what never goes in one: subject then one-line bullets, no run numbers, no unrelated churn
 applies: COMMIT_EDITMSG
 related:
 ---

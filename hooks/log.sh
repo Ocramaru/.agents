@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Sourced by every hook: one log line per firing, so "did it fire" is answerable afterwards, and which `agent` to call.
 #
 # A hook is silent by design: it either injects context the model never shows you, or it has
@@ -12,6 +13,8 @@ AGENTS_HOOK_LOG="${AGENTS_HOOK_LOG:-$HOME/.agents/.hooks.log}"
 # The CLI every hook calls: a clone's own bin/agent, or the console script an install put on PATH,
 # which starts without the `uv run` a clone pays. A builtin test, so no fork on every edit.
 AGENTS_CLI="$HOME/.agents/bin/agent"
+# an install records its `agent` by absolute path in .cli, for a git GUI or a desktop app whose PATH lacks uv's bin
+[[ -x "$AGENTS_CLI" ]] || { read -r AGENTS_CLI < "$HOME/.agents/.cli" || true; } 2>/dev/null
 [[ -x "$AGENTS_CLI" ]] || AGENTS_CLI=agent
 
 hook_log() {  # hook_log <hook> <session> <what happened...>
@@ -22,7 +25,7 @@ hook_log() {  # hook_log <hook> <session> <what happened...>
   text="${*//$tab/ }"   # one row per line, tab-separated, so neither goes into the text
   {
     local size lock="$AGENTS_HOOK_LOG.lock"
-    size=$(wc -c < "$AGENTS_HOOK_LOG" 2>/dev/null || echo 0)   # stat -c is GNU; wc is everywhere
+    size=$(wc -c 2>/dev/null < "$AGENTS_HOOK_LOG" || echo 0)   # stat -c is GNU; wc is everywhere
     if [[ "$size" -gt 1000000 ]]; then
       # mkdir is the lock, since macOS has no flock; a lock older than a minute was left by a killed hook.
       # A line appended while the copy is made is lost, which once a megabyte is cheaper than locking every line.
@@ -34,4 +37,14 @@ hook_log() {  # hook_log <hook> <session> <what happened...>
     fi
     printf '%s\t%-10s\t%-8s\t%s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$hook" "${session:0:8}" "${text//$newline/ }" >> "$AGENTS_HOOK_LOG"
   } 2>/dev/null || true
+}
+
+# the words of the one line a person sees, as agentkit's words.py says them
+count() {  # count <number> <word>: "1 note", "3 notes"
+  printf '%s %s%s' "$1" "$2" "$([[ "$1" == 1 ]] || echo s)"
+}
+
+measure() {  # measure <bytes>: "512 B", or "3k" from a kilobyte up
+  # bytes under a kilobyte: "(0k)" read as nothing delivered, and one session went looking for the rest
+  if [[ "$1" -lt 1024 ]]; then printf '%s B' "$1"; else printf '%sk' "$(( $1 / 1024 ))"; fi
 }

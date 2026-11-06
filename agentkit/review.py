@@ -1,4 +1,4 @@
-"""Fan an agent out over many files, one session each.
+"""Fan an agent out over many files, one session each, or hold one session over several when the findings are between them.
 
 One file per session keeps findings specific, costs one file per failure, and never needs the repo in one context window.
 """
@@ -17,12 +17,14 @@ from agentkit.session import Message, Session
 from agentkit.standards import Library
 
 
-def skipped(path: Path, root: Path) -> list[str]:
-  """The directories no review reads that `path` sits under, judged from `root` down; empty when a review reads it.
-  Judged on the absolute path, every file of a repo living under a directory called `build` or `vendor` is skipped."""
-  try: parts = Path(path).resolve().relative_to(Path(root).resolve()).parts
-  except ValueError: parts = Path(path).parts
-  return [directory for directory in parts[:-1] if tree.ignored(directory)]
+def unread(root: Path, relative: str, exclude: list[str], max_bytes: int, skip: list[str]) -> str | None:
+  """Why no review reads the file at `relative` under `root`, as a phrase, or None when one does; discovery, a commit's file list and a named file all ask it, with `skip` read once from `tree.skipped`.
+  Judged from `root` down, since on the absolute path every file of a repo under a `build` would be skipped, and by name before the stat, the costly part."""
+  if directories := [directory for directory in relative.split("/")[:-1] if tree.ignored(directory, skip)]: return f"under {', '.join(directories)}"
+  # `**/` matches no directory as well, as in .gitignore, so `**/uv.lock` excludes the root's
+  if glob := next((glob for glob in exclude if fnmatch.fnmatch(relative, glob) or (glob.startswith("**/") and fnmatch.fnmatch(relative, glob[3:]))), None): return f"excluded by {glob}"
+  if not (path := Path(root) / relative).is_file(): return "not a file"
+  return f"over max_bytes ({max_bytes})" if path.stat().st_size > max_bytes else None
 
 
 def _matches(name: str, globs: list[str]) -> bool:
@@ -31,26 +33,18 @@ def _matches(name: str, globs: list[str]) -> bool:
 
 
 def discover(root: Path, exclude: list[str], max_bytes: int) -> list[Path]:
-  """The files under `root` that a review may read: not in a skipped directory, not excluded, not over `max_bytes`. `exclude` matches the relative path.
-  Names are filtered before any file is stat'ed, since the stat is the costly part."""
+  """The files under `root` that a review may read: not in a skipped directory, not excluded, not over `max_bytes`. `exclude` matches the relative path."""
   # tracked and not-yet-added files, both honouring .gitignore; -z, since git otherwise quotes a non-ASCII name that exists on no disk
-  listed = git.run(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+  listed, skip = git.run(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"), tree.skipped(root)
   if listed.returncode == 0: relatives = [name for name in listed.stdout.split("\0") if name]
   else:   # no git: a walk that never enters a skipped directory
     relatives = []
     for here, directories, files in os.walk(root):   # pruned before descending, where rglob walks everything and filters after
-      directories[:] = [directory for directory in directories if not tree.ignored(directory)]
+      directories[:] = [directory for directory in directories if not tree.ignored(directory, skip)]
       base = Path(here).relative_to(root)
       relatives += [(base / name).as_posix() for name in files]
 
-  out = []
-  for relative in relatives:
-    parts = relative.split("/")
-    if any(tree.ignored(directory) for directory in parts[:-1]): continue
-    if any(fnmatch.fnmatch(relative, glob) for glob in exclude): continue
-    path = Path(root) / relative
-    if path.is_file() and path.stat().st_size <= max_bytes: out.append(path)
-  return sorted(out)
+  return sorted(Path(root) / relative for relative in relatives if not unread(root, relative, exclude, max_bytes, skip))
 
 
 EMPTY = "empty, nothing to review"
@@ -76,7 +70,8 @@ def plan(names: list[str], found: dict, files: list[Path], discovered: list[Path
          globs: list[str] | None = None, explicit: bool = True) -> list[tuple[str, list[Path]]]:
   """What each agent reads; within a kind, each file goes to the most specific agent that takes it.
   An agent takes a file inside its own `applies`, if any, that a standard it judges against governs.
-  A file named on the command line skips the filter unless the agent has its own `applies`; one from a commit never does."""
+  A file named on the command line skips the filter unless the agent has its own `applies`; one from a commit never does.
+  `globs`, when given, selects by basename glob instead of through each agent's standards."""
   plans, kind = [], agents.kind_of(found)
 
   for name in names:
@@ -137,7 +132,7 @@ def task_id(agent: str, root: Path, relative: str) -> str:
   return f"review-{agent}-{Path(root).name}-{relative.replace('/', '_').strip('_')}"
 
 
-DISMISSED = ("Already raised on this file and closed by someone who read it. Do not raise these "
+DISMISSED = ("Already raised and closed by someone who read the file. Do not raise these "
              "again unless the reason given no longer holds; if it no longer does, say so.")
 
 
@@ -210,3 +205,36 @@ def run(agent: str, backend: Backend, paths: list[Path], root: Path, definition,
       if on_done: on_done(result)
       if record: put(record)   # after the result is reported, so a failure writing the reviews does not replace it; a verdict that still stands is already in the reviews
   return results
+
+
+def whole(agent: str, backend: Backend, files: dict[Path, str], definition, root: Path, task: str, *,
+          role: str | None = None, effort: str | None = None, run: str | None = None, fresh: bool = False) -> dict:
+  """One conversation over several files, each introduced as what `files` says it is, kept in `root`'s reviews with every finding under its own file.
+  For findings between files, which a session per file cannot see; as in `run`, a verdict whose files, instructions, model and effort are unchanged is reused unless `fresh`."""
+  role, effort, began = role or definition.get("model"), effort or definition.get("effort") or None, time.monotonic()
+  base = (git.root(root) or Path(root)).resolve()
+  shown = {label(Path(path).resolve(), base): (Path(path), what) for path, what in files.items()}   # by the name close and the reviews use: repo-relative inside it, absolute outside
+  try: closed, known = reviews.dismissals(root), {} if fresh else reviews.verdicts(root)
+  except Exception: closed, known = {}, {}   # noqa: BLE001 -- no memory of earlier runs beats no review
+
+  instructions = agents.instructions(definition)
+  body = "What each file is:\n" + "\n".join(f"- {name}: {what}" for name, (_, what) in shown.items()) + "\n\n" + agents.prompt([(name, path.read_text(encoding="utf-8")) for name, (path, _) in shown.items()])
+  judged = hashlib.sha256("\0".join(part or "" for part in (body, instructions, role, backend.name, effort)).encode()).hexdigest()[:16]
+  if (previous := known.get(task)) and previous["digest"] == judged:
+    return {"file": f"{len(shown)} files", "agent": agent, "task": task, "state": "completed", "kind": "findings", "body": previous["body"],
+            "findings": previous["findings"], "seconds": 0.0, "reused": previous["run"] or "an earlier run"}
+
+  if dismissed := [closure for name in shown for closure in closed.get(name, [])]:
+    body += f"\n\n{DISMISSED}\n\n" + "\n".join(f"- {closure['file']} line {closure['line']}: {closure['issue']} (closed as {closure['verdict']}: {closure['reason'] or 'no reason given'})" for closure in dismissed)
+
+  session = Session(task)
+  message = session.send(agent, backend, body, instructions=instructions, role=role, effort=effort)
+  found = findings(message.data)
+  for finding in found:   # the name it was shown by, so the finding matches `agent sub close` and the next review's dismissals; a name it was not shown stays as written
+    given = str(finding.get("file", "")).strip()
+    near = [name for name in shown if name in (given, str(Path(given).expanduser()))] or [name for name in shown if given and name.endswith(f"/{given.lstrip('./')}")]
+    finding["file"] = near[0] if len(near) == 1 else given
+
+  reviews.write(reviews.record(session, agent, backend.name, root, "", message, found, role, run, judged), root)
+  return {"file": f"{len(shown)} files", "agent": agent, "task": task, "state": message.state, "kind": message.kind,
+          "body": message.body, "findings": found, "seconds": round(time.monotonic() - began, 1)}

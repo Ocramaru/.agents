@@ -28,8 +28,10 @@ def cmd_hook(args) -> int:
   root = git.root(Path(args.repo).resolve())
   if root is None: return fail(f"{Path(args.repo).resolve()} is not a git repo", 2)
 
-  if args.action == "install" and install.global_hooks_path():   # git reads hooksPath instead of the repo's hooks, so this would never run
-    note("the global hook is on, so this repo is already reviewed if it has a .agents/; nothing to install here")
+  if args.action == "install" and (hooks_path := git.run(root, "config", "--get", "core.hooksPath").stdout.strip()):   # git reads hooksPath instead of the repo's hooks, so this would never run
+    if not install.ours(hooks_path): 
+      return fail(f"git runs this repo's hooks from core.hooksPath {hooks_path}, never {install.repo_hook(root).parent}, so a hook installed there would not run. Add `\"$HOME/.agents/hooks/post-commit.sh\" auto` to the post-commit hook in {hooks_path} instead")
+    note("core.hooksPath is this hub's, so this repo is already reviewed if it has a .agents/; nothing to install here")
     return 0
 
   if args.action == "status":
