@@ -26,8 +26,9 @@ def profile() -> list[tuple[str, str, str]]:
   if not where.is_dir(): return [("profile", f"{short(where)}, which does not exist", "fail")]
 
   origin = git.run(where, "remote", "get-url", "origin").stdout.strip()
-  problems = [(problem, "warn") for problem in _profile.drift(where)] or [("nothing unpushed", "") if (where / ".git").exists() else ("not a git repo", "warn")]
-  return [("profile", f"{short(where)} ({origin})", "") if origin else ("profile", f"{short(where)} (no remote, so no other machine gets it)", "warn"), *(("profile", text, level) for text, level in problems)]
+  problems = [(problem, "warn") for problem in _profile.drift(where)] or ([] if (where / ".git").exists() else [("not a git repo", "warn")])
+  clean = "" if problems else ", nothing unpushed"   # said on the profile's own row, as every part that is fine says so in one
+  return [("profile", f"{short(where)} ({origin}){clean}", "") if origin else ("profile", f"{short(where)} (no remote, so no other machine gets it)", "warn"), *(("profile", text, level) for text, level in problems)]
 
 
 def backend() -> list[tuple[str, str, str]]:

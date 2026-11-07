@@ -21,6 +21,6 @@ HUB=$(cd -P -- "$(dirname -- "$src")/.." && pwd)
 # -P: `-m` otherwise puts the current directory first on sys.path, so running `agent` from inside
 # any checkout holding an `agentkit/` -- another clone of .agents -- ran that one instead.
 if command -v uv >/dev/null 2>&1; then
-  exec env PYTHONPATH="$HUB" uv run --project "$HUB" --quiet python -P -m agentkit "$@"
+  exec env PYTHONPATH="$HUB" uv run --project "$HUB" --no-dev --quiet python -P -m agentkit "$@"   # --no-dev: a hook needs duckdb and rich, never the tests' pytest
 fi
 exec env PYTHONPATH="$HUB" python3 -P -m agentkit "$@"

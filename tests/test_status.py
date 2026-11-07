@@ -62,6 +62,8 @@ def test_the_profile_its_remote_and_where_each_standard_comes_from(tmp_path, mon
   assert shown["findings"] == [f"none (no reviews in {repo.resolve()})"]
   monkeypatch.setenv("AGENTS_PROFILE", str(mine))
   assert [level for *_, level in status.profile()] == ["", "warn"]   # what another machine would miss wants a look
+  agentkit.git.run(mine, "push", "-q")
+  assert status.profile() == [("profile", f"{status.short(mine)} ({bare}), nothing unpushed", "")]   # a clean profile is one row
 
 
 def test_the_default_backend_its_models_and_the_role_each_reviewer_asks_for(tmp_path, monkeypatch):
